@@ -137,6 +137,9 @@ public:
 	// Parameters
 	SLAM_params params;
 
+	// Pose interpolation for motion distortion
+	BundleIcpResults pose_interpolation;
+
 	// Map used by the algorithm
 	PointMap map;
 
