@@ -10,8 +10,8 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
-#include <Eigen/Eigenvalues>
 #include "../cloud/cloud.h"
+#include <Eigen/Eigenvalues>
 
 # include "../pointmap/pointmap.h"
 

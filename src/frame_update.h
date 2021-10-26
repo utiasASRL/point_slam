@@ -27,6 +27,7 @@
 
 using namespace std;
 
+
 // KDTree type definition
 typedef nanoflann::KDTreeSingleIndexAdaptor<nanoflann::L2_Simple_Adaptor<float, PointCloud>, PointCloud, 3> PointXYZ_KDTree;
 typedef Eigen::Matrix<double, 6, 6> Matrix6d;
@@ -43,6 +44,7 @@ Plane3D extract_ground(vector<PointXYZ>& points,
 					   float dist_thresh = 0.1,
 					   int max_iter = 200,
 					   bool mode_2D = false);
+
 
 Eigen::Matrix4d transformListenerToEigenMatrix(const tf::TransformListener& listener, const string& target, const string& source, const ros::Time& stamp);
 Eigen::Matrix4d odomMsgToEigenMatrix(const nav_msgs::Odometry& odom);
