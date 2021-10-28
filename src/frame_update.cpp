@@ -485,9 +485,25 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 	if (params.motion_distortion)
 	{
-		throw std::invalid_argument("motion_distortion not handled yet");
+		// throw std::invalid_argument("motion_distortion not handled yet");
 		// TODO Here:	- Handle case of motion distorsion
 		//				- optimize by using the phis computed in ICP
+		
+		// Update map taking motion distortion into account
+		size_t iphi = 0;
+		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
+		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
+		for (auto& phi : params.icp_params.phis){
+			float t = (phi - params.icp_params.init_phi) / (2 * M_PI - params.icp_params.init_phi);
+			Eigen::Matrix4d phi_H = pose_interpolation.pose_interp(t, params.icp_params.init_transform, icp_results.transform, 0);		
+			Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
+			Eigen::Matrix3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
+			pts_mat.col(iphi) = (phi_R * pts_mat.col(iphi)) + phi_T;
+			norms_mat.col(iphi) = phi_R * norms_mat.col(iphi)
+			// iphi++;
+		}
+
+	
 	}
 	else
 	{
@@ -518,8 +534,19 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	PointXYZ center;
 	if (params.motion_distortion)
 	{
-		throw std::invalid_argument("motion_distortion not handled yet");
+		// throw std::invalid_argument("motion_distortion not handled yet");
 		// TODO: handle this case
+		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)f_pts.data(), 3, f_pts.size());
+		
+		Eigen::Matrix4d phi_H = pose_interpolation.pose_interp(t, params.icp_params.init_transform, icp_results.transform, 0);		
+		Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
+		Eigen::Matrix3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
+		pts_mat.col(iphi) = (phi_R * pts_mat.col(iphi)) + phi_T;
+		center.x = phi_T.x();
+		center.y = phi_T.y();
+		center.z = phi_T.z();
+
+		iphi++;
 	}
 	else
 	{

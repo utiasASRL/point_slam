@@ -151,6 +151,8 @@ public:
 	// Current pose correction from odometry to map
 	Eigen::Matrix4d H_OdomToMap;
 
+	
+
 	// Current number of aligned frames
 	int n_frames;
 
