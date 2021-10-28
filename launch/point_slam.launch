@@ -16,8 +16,8 @@
     <param name="filter" value="$(arg filter)"/>
     <param name="gt_classify" value="$(arg gt_classify)"/>
 
-    <param name="map_voxel_size" value="0.05"/>         <!-- Originally 0.03 -->
-    <param name="frame_voxel_size" value="0.20"/>       <!-- Originally 0.10 -->
+    <param name="map_voxel_size" value="0.03"/>         <!-- Originally 0.03 -->
+    <param name="frame_voxel_size" value="0.10"/>       <!-- Originally 0.10 -->
     <param name="map2d_pixel_size" value="0.05"/>
     <param name="map2d_max_count" value="50"/>
     <param name="map2d_z_min" value="0.2"/>

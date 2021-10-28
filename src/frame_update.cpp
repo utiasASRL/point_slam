@@ -13,6 +13,11 @@ void dummy_callback(const nav_msgs::OccupancyGrid::ConstPtr& msg)
   ROS_INFO("I heard one pred visu message");
 }
 
+void dummy_callback_2(const sensor_msgs::PointCloud2::ConstPtr& msg)
+{
+  ROS_INFO("I heard one pred cloud message");
+}
+
 
 //-----------------------------------------------------------------------------------------------------------------------------
 // Utilities
@@ -218,14 +223,13 @@ void PointMapSLAM::gotCloud(const sensor_msgs::PointCloud2::ConstPtr& msg)
 	return;
 }
 
-
 void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map)
 {
 	//////////////////////
 	// Optional verbose //
 	//////////////////////
 
-	params.verbose = 1;
+	// params.verbose = 1;
 
 	vector<string> clock_str;
 	vector<clock_t> t;
@@ -363,7 +367,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	lidar_log_radius(polar_pts, polar_r, params.r_scale);
 
 	// Remove outliers (only for real frames)
-	if (params.motion_distortion)
+	if (false && params.motion_distortion)
 	{
 
 		// TODO: HERE modify outlier detection, using lidar angles
@@ -487,7 +491,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	{
 		throw std::invalid_argument("motion_distortion not handled yet");
 		// TODO Here:	- Handle case of motion distorsion
-		//				- optimize by using the phis computed in ICP
+		//				- USe point indices for interpolation
 	}
 	else
 	{
@@ -873,6 +877,7 @@ int main(int argc, char **argv)
 	{
 		// 3. Using raw point clouds
 		ROS_WARN_STREAM("PointSlam in normal mode: subscribing to " << velo_topic);
+		ros::Subscriber pred_sub = nh.subscribe(pred_topic, 1, dummy_callback);
 		ros::Subscriber lidar_sub = nh.subscribe(velo_topic, 1, &PointMapSLAM::gotCloud, &mapper);
 		ros::spin();
 	}

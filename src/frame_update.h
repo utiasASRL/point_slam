@@ -34,6 +34,7 @@ typedef Eigen::Matrix<double, 6, 6> Matrix6d;
 typedef Eigen::Matrix<double, 6, 1> Vector6d;
 
 void dummy_callback(const nav_msgs::OccupancyGrid::ConstPtr& msg);
+void dummy_callback_2(const sensor_msgs::PointCloud2::ConstPtr& msg);
 
 // Utilities
 // *********
