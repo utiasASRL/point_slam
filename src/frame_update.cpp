@@ -460,7 +460,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	else
 	{
 		params.icp_params.init_transform = H_scannerToMap_init;
-		PointToMapICP(sub_pts, icp_scores, map, params.icp_params, icp_results);
+		PointToMapICP(sub_pts, sub_inds, icp_scores, map, params.icp_params, icp_results, last_H);
 	}
 
 	t.push_back(std::clock());
@@ -512,14 +512,21 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
 			for (auto& ind : sub_inds){
 				float t = float(ind) / f_pts.size();
-				Eigen::Matrix4d phi_H = pose_interpolation.pose_interp(t, last_H, icp_results.transform, 0);		
-				Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
-				Eigen::Matrix3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
-				pts_mat.col(iphi) = (phi_R * pts_mat.col(iphi)) + phi_T;
-				norms_mat.col(iphi) = phi_R * norms_mat.col(iphi)
+				Eigen::Matrix4d H_rect = pose_interpolation.pose_interp(t, last_H, icp_results.transform, 0);		
+				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
+				Eigen::Matrix3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+				pts_mat.col(i_inds) = (R_rect * pts_mat.col(i_inds)) + T_rect;
+				norms_mat.col(i_inds) = (R_rect * norms_mat.col(i_inds)
 				i_inds++;
 			}
-		
+
+			// for debug plots
+			// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
+			// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
+			// Eigen::Matrix3f R_tot = (icp_results.transform.block(0, 0, 3, 3)).cast<float>();
+			// Eigen::Vector3f T_tot = (icp_results.transform.block(0, 3, 3, 1)).cast<float>();
+			// pts_mat = (R_tot * pts_mat).colwise() + T_tot;
+			// norms_mat = R_tot * norms_mat;
 		}
 
 	
@@ -559,15 +566,17 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)f_pts.data(), 3, f_pts.size());
 		for (auto& ind : sub_inds){
 			float t = float(ind) / f_pts.size();
-			Eigen::Matrix4d phi_H = pose_interpolation.pose_interp(t, last_H, icp_results.transform, 0);		
-			Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
-			Eigen::Matrix3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
-			pts_mat.col(iphi) = (phi_R * pts_mat.col(iphi)) + phi_T;
-			center.x = phi_T.x();
-			center.y = phi_T.y();
-			center.z = phi_T.z();
+			Eigen::Matrix4d H_rect = pose_interpolation.pose_interp(t, last_H, icp_results.transform, 0);		
+			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
+			Eigen::Matrix3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+			pts_mat.col(i_inds) = (R_rect * pts_mat.col(i_inds)) + T_rect;
+			center.x = T_rect.x();
+			center.y = T_rect.y();
+			center.z = T_rect.z();
 
 			i_inds++;
+	
+	
 	}
 	else
 	{

@@ -864,15 +864,14 @@ void PointToMapICPDebug(vector<PointXYZ>& tgt_pts,
 		// Align targets taking motion distortion into account
 		if (params.motion_distortion)
 		{
-			size_t iphi = 0;
-			for (auto& phi : phis)
-			{
-				float t = (phi - params.init_phi) / (phi1 - params.init_phi);
-				Eigen::Matrix4d phi_H = pose_interp(t, params.init_transform, results.transform, 0);
-				Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
-				Eigen::Vector3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
-				aligned_mat.col(iphi) = (phi_R * targets_mat.col(iphi)) + phi_T;
-				iphi++;
+			size_t i_inds = 0;
+			for (auto& ind : sub_inds){
+				float t = float(ind) / f_pts.size();
+				Eigen::Matrix4d H_rect = pose_interpolation.pose_interp(t, last_H, results.transform, 0);		
+				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
+				Eigen::Matrix3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+				aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;
+				i_inds++;
 			}
 		}
 		else
@@ -1025,11 +1024,11 @@ void PointToMapICPDebug(vector<PointXYZ>& tgt_pts,
 }
 
 
-void PointToMapICP(vector<PointXYZ>& tgt_pts,
+void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 	vector<float>& tgt_w,
 	PointMap& map,
 	ICP_params& params,
-	ICP_results& results)
+	ICP_results& results, Eigen::Matrix4d& last_H)
 {
 	// Parameters
 	// **********
@@ -1205,15 +1204,24 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts,
 		// Align targets taking motion distortion into account
 		if (params.motion_distortion)
 		{
-			size_t iphi = 0;
-			for (auto& phi : phis)
-			{
-				float t = (phi - params.init_phi) / (phi1 - params.init_phi);
-				Eigen::Matrix4d phi_H = pose_interp(t, params.init_transform, results.transform, 0);
-				Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
-				Eigen::Vector3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
-				aligned_mat.col(iphi) = (phi_R * targets_mat.col(iphi)) + phi_T;
-				iphi++;
+			// size_t iphi = 0;
+			// for (auto& phi : phis)
+			// {
+			// 	float t = (phi - params.init_phi) / (phi1 - params.init_phi);
+			// 	Eigen::Matrix4d phi_H = pose_interp(t, params.init_transform, results.transform, 0);
+			// 	Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
+			// 	Eigen::Vector3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
+			// 	aligned_mat.col(iphi) = (phi_R * targets_mat.col(iphi)) + phi_T;
+			// 	iphi++;
+			// }
+			size_t i_inds = 0;
+			for (auto& ind : sub_inds){
+				float t = float(ind) / f_pts.size();
+				Eigen::Matrix4d H_rect = pose_interpolation.pose_interp(t, last_H, results.transform, 0);		
+				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
+				Eigen::Matrix3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+				aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;
+				i_inds++;
 			}
 		}
 		else
