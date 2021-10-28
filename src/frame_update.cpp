@@ -452,6 +452,10 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		// icp_results.transform = H_scannerToMap_init;
 		icp_results.transform = Eigen::Matrix4d::Identity();
 		icp_results.transform(2, 3) = 0.7;
+
+		// initialize last_H for the motion distortion
+		last_H = Eigen::Matrix4d::Identity();
+		last_H.transform(2, 3) = 0.7;
 	}
 	else
 	{
@@ -490,17 +494,32 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		//				- optimize by using the phis computed in ICP
 		
 		// Update map taking motion distortion into account
-		size_t iphi = 0;
-		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
-		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
-		for (auto& phi : params.icp_params.phis){
-			float t = (phi - params.icp_params.init_phi) / (2 * M_PI - params.icp_params.init_phi);
-			Eigen::Matrix4d phi_H = pose_interpolation.pose_interp(t, params.icp_params.init_transform, icp_results.transform, 0);		
-			Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
-			Eigen::Matrix3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
-			pts_mat.col(iphi) = (phi_R * pts_mat.col(iphi)) + phi_T;
-			norms_mat.col(iphi) = phi_R * norms_mat.col(iphi)
+		// size_t iphi = 0;
+		// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
+		// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
+		// for (auto& phi : params.icp_params.phis){
+		// 	float t = (phi - params.icp_params.init_phi) / (2 * M_PI - params.icp_params.init_phi);
+			// Eigen::Matrix4d phi_H = pose_interpolation.pose_interp(t, params.icp_params.init_transform, icp_results.transform, 0);		
+			// Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
+			// Eigen::Matrix3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
+			// pts_mat.col(iphi) = (phi_R * pts_mat.col(iphi)) + phi_T;
+			// norms_mat.col(iphi) = phi_R * norms_mat.col(iphi)
 			// iphi++;
+		
+		// Update map taking motion distortion into account
+			size_t i_inds = 0;
+			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
+			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
+			for (auto& ind : sub_inds){
+				float t = float(ind) / f_pts.size();
+				Eigen::Matrix4d phi_H = pose_interpolation.pose_interp(t, last_H, icp_results.transform, 0);		
+				Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
+				Eigen::Matrix3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
+				pts_mat.col(iphi) = (phi_R * pts_mat.col(iphi)) + phi_T;
+				norms_mat.col(iphi) = phi_R * norms_mat.col(iphi)
+				i_inds++;
+			}
+		
 		}
 
 	
@@ -536,17 +555,19 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	{
 		// throw std::invalid_argument("motion_distortion not handled yet");
 		// TODO: handle this case
+		size_t i_inds = 0;
 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)f_pts.data(), 3, f_pts.size());
-		
-		Eigen::Matrix4d phi_H = pose_interpolation.pose_interp(t, params.icp_params.init_transform, icp_results.transform, 0);		
-		Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
-		Eigen::Matrix3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
-		pts_mat.col(iphi) = (phi_R * pts_mat.col(iphi)) + phi_T;
-		center.x = phi_T.x();
-		center.y = phi_T.y();
-		center.z = phi_T.z();
+		for (auto& ind : sub_inds){
+			float t = float(ind) / f_pts.size();
+			Eigen::Matrix4d phi_H = pose_interpolation.pose_interp(t, last_H, icp_results.transform, 0);		
+			Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
+			Eigen::Matrix3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
+			pts_mat.col(iphi) = (phi_R * pts_mat.col(iphi)) + phi_T;
+			center.x = phi_T.x();
+			center.y = phi_T.y();
+			center.z = phi_T.z();
 
-		iphi++;
+			i_inds++;
 	}
 	else
 	{
