@@ -49,6 +49,7 @@ public:
 	// For motion distortion, angle phi of the last transform
 	float init_phi;
 	bool motion_distortion;
+	vector<float> phis;
 
 	// Initial transformation
 	Eigen::Matrix4d init_transform;

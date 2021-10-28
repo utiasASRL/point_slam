@@ -1,4 +1,3 @@
-
 #include "icp.h"
 
 
@@ -665,10 +664,6 @@ void BundleICP(vector<PointXYZ>& points,
 	//	cout << dH << endl;
 	//}
 
-
-
-
-
 }
 
 
@@ -1045,7 +1040,6 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts,
 	size_t first_steps = params.avg_steps / 2 + 1;
 
 	// Get angles phi of each points for motion distorsion
-	vector<float> phis;
 	float phi1 = 0;
 	if (params.motion_distortion)
 	{

@@ -1,6 +1,8 @@
 {
     "files.associations": {
         "*.tcc": "cpp",
-        "cmath": "cpp"
+        "cmath": "cpp",
+        "core": "cpp",
+        "numericaldiff": "cpp"
     }
 }
