@@ -102,7 +102,7 @@ public:
 		lidar_n_lines = 32;
 		map_voxel_size = 0.08;
 		frame_voxel_size = 0.16;
-		motion_distortion = false;
+		motion_distortion = true;
 		H_velo_base = Eigen::Matrix4d::Identity(4, 4);
 
 		h_scale = 0.5;
@@ -137,9 +137,6 @@ public:
 	// Parameters
 	SLAM_params params;
 
-	// Pose interpolation for motion distortion
-	BundleIcpResults pose_interpolation;
-
 	// Map used by the algorithm
 	PointMap map;
 
@@ -151,7 +148,6 @@ public:
 	// Current pose correction from odometry to map
 	Eigen::Matrix4d H_OdomToMap;
 
-	
 
 	// Current number of aligned frames
 	int n_frames;
@@ -235,6 +231,8 @@ public:
 		file.pushField(num_poses, 4, npm::PLY_DOUBLE, {"rot_x", "rot_y", "rot_z", "rot_w"}, rots);
 		file.write();
 	}
+
+
 };
 
 // Main

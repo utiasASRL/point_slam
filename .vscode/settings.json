@@ -1,0 +1,9 @@
+{
+    "files.associations": {
+        "core": "cpp",
+        "deque": "cpp",
+        "string": "cpp",
+        "vector": "cpp",
+        "numericaldiff": "cpp"
+    }
+}

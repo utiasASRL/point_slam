@@ -270,6 +270,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// Loop over points and copy in vector container. Do the filtering if necessary
 	vector<PointXYZ> f_pts;
 	f_pts.reserve(N);
+	
 	if (filtering)
 	{
 		sensor_msgs::PointCloud2ConstIterator<float> iter_i(*msg, "intensity"), iter_x(*msg, "x"), iter_y(*msg, "y");
@@ -371,7 +372,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 		// TODO: ALSO we need to modify the radius neighbor to adapt the radius to each ring
 
-		string path = "/home/administrator/1-Deep-Collider/results/test_ptmap/";
+		string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps";
 		char buffer[200];
 		sprintf(buffer, "debug_rtp_%05d.ply", n_frames);
 		string filepath = path + string(buffer);
@@ -396,6 +397,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// Get subsampling of the frame in carthesian coordinates
 	vector<PointXYZ> sub_pts;
 	vector<size_t> sub_inds;
+
 	grid_subsampling_centers(f_pts, sub_pts, sub_inds, params.frame_voxel_size);
 
 	t.push_back(std::clock());
@@ -445,7 +447,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 	// Create result containers
 	ICP_results icp_results;
-
+	
 	// If no map is available, use identity as the first pose
 	if (map.size() < 1)
 	{
@@ -455,7 +457,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 		// initialize last_H for the motion distortion
 		last_H = Eigen::Matrix4d::Identity();
-		last_H.transform(2, 3) = 0.7;
+		last_H(2, 3) = 0.7;
 	}
 	else
 	{
@@ -505,18 +507,18 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 			// pts_mat.col(iphi) = (phi_R * pts_mat.col(iphi)) + phi_T;
 			// norms_mat.col(iphi) = phi_R * norms_mat.col(iphi)
 			// iphi++;
-		
+
 		// Update map taking motion distortion into account
 			size_t i_inds = 0;
 			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
 			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
 			for (auto& ind : sub_inds){
-				float t = float(ind) / f_pts.size();
-				Eigen::Matrix4d H_rect = pose_interpolation.pose_interp(t, last_H, icp_results.transform, 0);		
+				float t = float(ind) / sub_pts.size();
+				Eigen::Matrix4d H_rect = pose_interp(t, last_H, (Eigen::Matrix4d)icp_results.transform, 0);		
 				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
-				Eigen::Matrix3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+				Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
 				pts_mat.col(i_inds) = (R_rect * pts_mat.col(i_inds)) + T_rect;
-				norms_mat.col(i_inds) = (R_rect * norms_mat.col(i_inds)
+				norms_mat.col(i_inds) = (R_rect * norms_mat.col(i_inds));
 				i_inds++;
 			}
 
@@ -527,8 +529,6 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 			// Eigen::Vector3f T_tot = (icp_results.transform.block(0, 3, 3, 1)).cast<float>();
 			// pts_mat = (R_tot * pts_mat).colwise() + T_tot;
 			// norms_mat = R_tot * norms_mat;
-		}
-
 	
 	}
 	else
@@ -562,21 +562,17 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	{
 		// throw std::invalid_argument("motion_distortion not handled yet");
 		// TODO: handle this case
-		size_t i_inds = 0;
 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)f_pts.data(), 3, f_pts.size());
-		for (auto& ind : sub_inds){
+		for (int ind = 0; ind < f_pts.size(); ind++){
 			float t = float(ind) / f_pts.size();
-			Eigen::Matrix4d H_rect = pose_interpolation.pose_interp(t, last_H, icp_results.transform, 0);		
+			Eigen::Matrix4d H_rect = pose_interp(t, last_H, (Eigen::Matrix4d)icp_results.transform, 0);		
 			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
-			Eigen::Matrix3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
-			pts_mat.col(i_inds) = (R_rect * pts_mat.col(i_inds)) + T_rect;
+			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+			pts_mat.col(ind) = (R_rect * pts_mat.col(ind)) + T_rect;
 			center.x = T_rect.x();
 			center.y = T_rect.y();
 			center.z = T_rect.z();
-
-			i_inds++;
-	
-	
+		}
 	}
 	else
 	{
@@ -593,7 +589,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 	// if (map2D.size() > 0 && n_frames % 1 == 0)
 	// {
-	// 	string path = "/home/administrator/1-Deep-Collider/results/test_ptmap/";
+	// 	string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/";
 	// 	char buffer[200];
 	// 	sprintf(buffer, "debug_frame_%05d.ply", n_frames);
 	// 	string filepath = path + string(buffer);
@@ -832,11 +828,11 @@ int main(int argc, char **argv)
 	string start_time;
 	if (!nh.getParam("start_time", start_time))
 	{
-		slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/tmp/";
+		slam_params.log_path = "/home/" + user_name + "/catkin_ws/src/point_slam_2/src/test_maps/logs/";
 	}
 	else
 	{
-		slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/";
+		slam_params.log_path = "/home/" + user_name + "catkin_ws/src/point_slam_2/src/test_maps/results/";
 		slam_params.log_path += start_time + "/logs-" + start_time + "/";
 	}
 

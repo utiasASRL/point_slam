@@ -6,7 +6,7 @@
   <arg name="filter" default="false" />
   <arg name="gt_classify" default="false" />
 
-  <node pkg="point_slam_2" type="frame_update" name="frame_update" output="screen">
+  <node pkg="point_slam_2" type="frame_update_2" name="frame_update_2" output="screen">
   
     <param name="odom_frame" value="odom"/>
     <param name="base_frame" value="base_link"/>

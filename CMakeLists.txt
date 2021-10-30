@@ -74,8 +74,8 @@ target_link_libraries(icp pointmap cloud ${catkin_LIBRARIES})
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
 
-add_executable(frame_update src/frame_update.cpp)
-target_link_libraries(frame_update icp pointmap polar_processing grid_subsampling cloud ${catkin_LIBRARIES})
+add_executable(frame_update_2 src/frame_update.cpp)
+target_link_libraries(frame_update_2 icp pointmap polar_processing grid_subsampling cloud ${catkin_LIBRARIES})
 
 
 #############

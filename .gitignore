@@ -1,0 +1,6 @@
+# ply, pgm, log files #
+#############
+
+*.ply
+*.pgm
+*.log

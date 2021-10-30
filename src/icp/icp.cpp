@@ -864,15 +864,16 @@ void PointToMapICPDebug(vector<PointXYZ>& tgt_pts,
 		// Align targets taking motion distortion into account
 		if (params.motion_distortion)
 		{
-			size_t i_inds = 0;
-			for (auto& ind : sub_inds){
-				float t = float(ind) / f_pts.size();
-				Eigen::Matrix4d H_rect = pose_interpolation.pose_interp(t, last_H, results.transform, 0);		
-				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
-				Eigen::Matrix3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
-				aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;
-				i_inds++;
-			}
+			throw std::invalid_argument("motion_distortion not handled yet");
+			// size_t i_inds = 0;
+			// for (auto& ind : sub_inds){
+			// 	float t = float(ind) / tgt_pts.size();
+			// 	Eigen::Matrix4d H_rect = pose_interpolation.pose_interp(t, last_H, results.transform, 0);		
+			// 	Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
+			// 	Eigen::Matrix3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+			// 	aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;
+			// 	i_inds++;
+			// }
 		}
 		else
 		{
@@ -1016,11 +1017,6 @@ void PointToMapICPDebug(vector<PointXYZ>& tgt_pts,
 	//	cout << endl << "dH" << b << " = " << endl;
 	//	cout << dH << endl;
 	//}
-
-
-
-
-
 }
 
 
@@ -1039,6 +1035,7 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 	size_t first_steps = params.avg_steps / 2 + 1;
 
 	// Get angles phi of each points for motion distorsion
+	vector<float> phis;
 	float phi1 = 0;
 	if (params.motion_distortion)
 	{
@@ -1216,10 +1213,10 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 			// }
 			size_t i_inds = 0;
 			for (auto& ind : sub_inds){
-				float t = float(ind) / f_pts.size();
-				Eigen::Matrix4d H_rect = pose_interpolation.pose_interp(t, last_H, results.transform, 0);		
+				float t = float(ind) / tgt_pts.size();
+				Eigen::Matrix4d H_rect = pose_interp(t, last_H, results.transform, 0);		
 				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
-				Eigen::Matrix3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+				Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
 				aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;
 				i_inds++;
 			}
