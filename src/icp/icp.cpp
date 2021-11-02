@@ -1024,7 +1024,7 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 	vector<float>& tgt_w,
 	PointMap& map,
 	ICP_params& params,
-	ICP_results& results, Eigen::Matrix4d& last_H)
+	ICP_results& results, Eigen::Matrix4d& last_H, int N_total)
 {
 	// Parameters
 	// **********
@@ -1037,16 +1037,16 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 	// Get angles phi of each points for motion distorsion
 	vector<float> phis;
 	float phi1 = 0;
-	if (params.motion_distortion)
-	{
-		phis.reserve(tgt_pts.size());
-		for (auto& p : tgt_pts)
-		{
-			phis.push_back(fmod(3 * M_PI / 2 - atan2(p.y, p.x), 2 * M_PI));
-			if (phis.back() > phi1)
-				phi1 = phis.back();
-		}
-	}
+	// if (params.motion_distortion)
+	// {
+	// 	phis.reserve(tgt_pts.size());
+	// 	for (auto& p : tgt_pts)
+	// 	{
+	// 		phis.push_back(fmod(3 * M_PI / 2 - atan2(p.y, p.x), 2 * M_PI));
+	// 		if (phis.back() > phi1)
+	// 			phi1 = phis.back();
+	// 	}
+	// }
 
 	// Create search parameters
 	nanoflann::SearchParams search_params;
@@ -1200,12 +1200,12 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 
 		// Align targets taking motion distortion into account
 		if (params.motion_distortion)
-		{
+		{	
 			// size_t iphi = 0;
 			// for (auto& phi : phis)
 			// {
 			// 	float t = (phi - params.init_phi) / (phi1 - params.init_phi);
-			// 	Eigen::Matrix4d phi_H = pose_interp(t, params.init_transform, results.transform, 0);
+			// 	Eigen::Matrix4d phi_H = pose_interp(t, last_H, results.transform, 0);
 			// 	Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
 			// 	Eigen::Vector3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
 			// 	aligned_mat.col(iphi) = (phi_R * targets_mat.col(iphi)) + phi_T;
@@ -1213,7 +1213,7 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 			// }
 			size_t i_inds = 0;
 			for (auto& ind : sub_inds){
-				float t = float(ind) / tgt_pts.size();
+				float t = float(ind) / float(N_total);
 				Eigen::Matrix4d H_rect = pose_interp(t, last_H, results.transform, 0);		
 				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
 				Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();

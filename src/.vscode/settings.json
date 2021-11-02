@@ -3,6 +3,7 @@
         "*.tcc": "cpp",
         "cmath": "cpp",
         "core": "cpp",
-        "numericaldiff": "cpp"
+        "numericaldiff": "cpp",
+        "vector": "cpp"
     }
 }

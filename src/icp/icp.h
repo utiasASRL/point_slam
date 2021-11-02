@@ -49,7 +49,7 @@ public:
 	// For motion distortion, angle phi of the last transform
 	float init_phi;
 	bool motion_distortion;
-	vector<float> phis;
+	// vector<float> phis;
 
 	// Initial transformation
 	Eigen::Matrix4d init_transform;
@@ -68,7 +68,7 @@ public:
 		rotDiffThresh = 0.1 * M_PI / 180.0;
 		transDiffThresh = 0.01;
 		init_phi = 0.0;
-		motion_distortion = false;
+		motion_distortion = true;
 		init_transform = Eigen::Matrix4d::Identity(4, 4);
 	}
 };
@@ -157,7 +157,7 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 	vector<float>& tgt_w,
 	PointMap& map,
 	ICP_params& params,
-	ICP_results& results, Eigen::Matrix4d& last_H);
+	ICP_results& results, Eigen::Matrix4d& last_H, int N_total);
 
 void BundleICP(vector<PointXYZ>& points,
 	vector<PointXYZ>& normals,

@@ -364,6 +364,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	lidar_log_radius(polar_pts, polar_r, params.r_scale);
 
 	// Remove outliers (only for real frames)
+	params.motion_distortion = true;
 	if (params.motion_distortion)
 	{
 
@@ -372,11 +373,11 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 		// TODO: ALSO we need to modify the radius neighbor to adapt the radius to each ring
 
-		string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps";
-		char buffer[200];
-		sprintf(buffer, "debug_rtp_%05d.ply", n_frames);
-		string filepath = path + string(buffer);
-		save_cloud(filepath, polar_pts);
+		// string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/";
+		// char buffer[200];
+		// sprintf(buffer, "debug_rtp_%05d.ply", n_frames);
+		// string filepath = path + string(buffer);
+		// save_cloud(filepath, polar_pts);
 
 		// Get an outlier score
 		vector<float> scores(polar_pts.size(), 0.0);
@@ -386,10 +387,10 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		filter_pointcloud(f_pts, scores, 0);
 		filter_pointcloud(polar_pts, scores, 0);
 
-		char buffer2[200];
-		sprintf(buffer2, "clean_rtp_%05d.ply", n_frames);
-		string filepath2 = path + string(buffer2);
-		save_cloud(filepath2, polar_pts);
+		// char buffer2[200];
+		// sprintf(buffer2, "clean_rtp_%05d.ply", n_frames);
+		// string filepath2 = path + string(buffer2);
+		// save_cloud(filepath2, polar_pts);
 	}
 
 	t.push_back(std::clock());
@@ -462,7 +463,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	else
 	{
 		params.icp_params.init_transform = H_scannerToMap_init;
-		PointToMapICP(sub_pts, sub_inds, icp_scores, map, params.icp_params, icp_results, last_H);
+		PointToMapICP(sub_pts, sub_inds, icp_scores, map, params.icp_params, icp_results, last_H, f_pts.size());
 	}
 
 	t.push_back(std::clock());
@@ -495,41 +496,37 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		// TODO Here:	- Handle case of motion distorsion
 		//				- optimize by using the phis computed in ICP
 		
-		// Update map taking motion distortion into account
+		// Update map taking motion distortion into account (angles)
 		// size_t iphi = 0;
 		// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
 		// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
+		// ROS_WARN_STREAM("md" << params.motion_distortion);
 		// for (auto& phi : params.icp_params.phis){
+		// 	ROS_WARN_STREAM("a" << params.icp_params.phis.size());
 		// 	float t = (phi - params.icp_params.init_phi) / (2 * M_PI - params.icp_params.init_phi);
-			// Eigen::Matrix4d phi_H = pose_interpolation.pose_interp(t, params.icp_params.init_transform, icp_results.transform, 0);		
-			// Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
-			// Eigen::Matrix3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
-			// pts_mat.col(iphi) = (phi_R * pts_mat.col(iphi)) + phi_T;
-			// norms_mat.col(iphi) = phi_R * norms_mat.col(iphi)
-			// iphi++;
+		// 	Eigen::Matrix4d phi_H = pose_interp(t, last_H, icp_results.transform, 0);		
+		// 	Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
+		// 	Eigen::Vector3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
+		// 	pts_mat.col(iphi) = (phi_R * pts_mat.col(iphi)) + phi_T;
+		// 	norms_mat.col(iphi) = phi_R * norms_mat.col(iphi);
+		// 	iphi++;
+		// }
 
 		// Update map taking motion distortion into account
-			size_t i_inds = 0;
-			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
-			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
-			for (auto& ind : sub_inds){
-				float t = float(ind) / sub_pts.size();
-				Eigen::Matrix4d H_rect = pose_interp(t, last_H, (Eigen::Matrix4d)icp_results.transform, 0);		
-				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
-				Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
-				pts_mat.col(i_inds) = (R_rect * pts_mat.col(i_inds)) + T_rect;
-				norms_mat.col(i_inds) = (R_rect * norms_mat.col(i_inds));
-				i_inds++;
-			}
+		size_t i_inds = 0;
+		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
+		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
+		for (auto& ind : sub_inds){
+			float t = float(ind) / f_pts.size();
+			Eigen::Matrix4d H_rect = pose_interp(t, last_H, icp_results.transform, 0);		
+			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
+			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+			pts_mat.col(i_inds) = (R_rect * pts_mat.col(i_inds)) + T_rect;
+			norms_mat.col(i_inds) = (R_rect * norms_mat.col(i_inds));
+			i_inds++;
+		}
 
-			// for debug plots
-			// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
-			// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
-			// Eigen::Matrix3f R_tot = (icp_results.transform.block(0, 0, 3, 3)).cast<float>();
-			// Eigen::Vector3f T_tot = (icp_results.transform.block(0, 3, 3, 1)).cast<float>();
-			// pts_mat = (R_tot * pts_mat).colwise() + T_tot;
-			// norms_mat = R_tot * norms_mat;
-	
+			
 	}
 	else
 	{
@@ -562,10 +559,24 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	{
 		// throw std::invalid_argument("motion_distortion not handled yet");
 		// TODO: handle this case
+		// size_t iphi = 0;
+		// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)f_pts.data(), 3, f_pts.size());
+		// for (auto& phi : params.icp_params.phis){
+		// 	float t = (phi - params.icp_params.init_phi) / (2 * M_PI - params.icp_params.init_phi);
+		// 	Eigen::Matrix4d phi_H = pose_interp(t, last_H, icp_results.transform, 0);		
+		// 	Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
+		// 	Eigen::Vector3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
+		// 	pts_mat.col(iphi) = (phi_R * pts_mat.col(iphi)) + phi_T;
+		// 	center.x = phi_T.x();
+		// 	center.y = phi_T.y();
+		// 	center.z = phi_T.z();
+		// 	iphi++;
+		// }
+
 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)f_pts.data(), 3, f_pts.size());
-		for (int ind = 0; ind < f_pts.size(); ind++){
+		for (auto& ind : sub_inds){
 			float t = float(ind) / f_pts.size();
-			Eigen::Matrix4d H_rect = pose_interp(t, last_H, (Eigen::Matrix4d)icp_results.transform, 0);		
+			Eigen::Matrix4d H_rect = pose_interp(t, last_H, icp_results.transform, 0);		
 			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
 			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
 			pts_mat.col(ind) = (R_rect * pts_mat.col(ind)) + T_rect;
