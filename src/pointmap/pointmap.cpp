@@ -22,6 +22,7 @@ void PointMapPython::update(vector<PointXYZ>& points0,
 		PointXYZ oldOriginCorner = floor(oldMinCorner * (1 / dl) - PointXYZ(1, 1, 1)) * dl;
 		originCorner = min_point(originCorner, oldOriginCorner);
 		maxCorner = max_point(maxCorner, oldMaxCorner);
+		
 	}
 
 	// Dimensions of the grid

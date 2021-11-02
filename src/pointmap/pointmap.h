@@ -1,7 +1,6 @@
 #pragma once
 
 
-#include "../../include/nanoflann/nanoflann.hpp"
 
 #include <set>
 #include <cstdint>
@@ -10,6 +9,8 @@
 #include <limits>
 
 #include "../cloud/cloud.h"
+
+#include "../../include/nanoflann/nanoflann.hpp"
 
 using namespace std;
 

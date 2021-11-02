@@ -1200,6 +1200,8 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts,
 
 		t[4] = std::clock();
 
+		int cdsnjivs = 0;
+
 
 		//////////////////////////////////////
 		// Alignment with Motion distorsion //

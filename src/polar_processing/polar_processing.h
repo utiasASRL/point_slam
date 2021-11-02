@@ -8,10 +8,12 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
-#include "../cloud/cloud.h"
-#include "../../include/nanoflann/nanoflann.hpp"
 #include <Eigen/Eigenvalues>
+
+#include "../cloud/cloud.h"
 #include "../pointmap/pointmap.h"
+
+#include "../../include/nanoflann/nanoflann.hpp"
 
 using namespace std;
 

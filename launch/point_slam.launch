@@ -38,7 +38,7 @@
     <param name="icp_samples" value="600"/>           <!-- Originally 600 -->
     <param name="icp_pairing_dist" value="2"/>
     <param name="icp_planar_dist" value="0.3"/>
-    <param name="icp_avg_steps" value="5"/>           <!-- Originally 5 -->
+    <param name="icp_avg_steps" value="4"/>           <!-- Originally 5 -->
     <param name="icp_max_iter" value="50"/>           <!-- Originally 100 -->
 
   </node>

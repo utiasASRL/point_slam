@@ -1,6 +1,4 @@
 #include "frame_update.h"
-#include <chrono>
-#include <thread>
 
 
 //-----------------------------------------------------------------------------------------------------------------------------
@@ -229,7 +227,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// Optional verbose //
 	//////////////////////
 
-	// params.verbose = 1;
+	params.verbose = 0;
 
 	vector<string> clock_str;
 	vector<clock_t> t;
@@ -272,6 +270,11 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	}
 
 	// Loop over points and copy in vector container. Do the filtering if necessary
+	float tan_theta2;
+	float last_tan_theta2 = 0;
+	int scan_col = 0;
+	bool using_col = false;
+	int col_stride = 3;
 	vector<PointXYZ> f_pts;
 	f_pts.reserve(N);
 	if (filtering)
@@ -294,6 +297,33 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 			// Add kept points to the vector container
 			f_pts.push_back(PointXYZ(*iter_x, *iter_y, *iter_z));
+		}
+	}
+	else if (col_stride > 1)
+	{
+		for (sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x"), iter_y(*msg, "y"), iter_z(*msg, "z");
+			 iter_x != iter_x.end();
+			 ++iter_x, ++iter_y, ++iter_z)
+		{
+
+			// Eliminate according to angle theta
+			tan_theta2 = *iter_z * *iter_z / (*iter_x * *iter_x + *iter_x * *iter_x);
+			if (tan_theta2 < last_tan_theta2)
+			{
+				if (++scan_col >= col_stride)
+				{
+					scan_col = 0;
+					using_col = true;
+				}
+				else
+					using_col = false;
+			}
+			last_tan_theta2 = tan_theta2;
+			
+
+			// Add all points to the vector container
+			if (using_col)
+				f_pts.push_back(PointXYZ(*iter_x, *iter_y, *iter_z));
 		}
 	}
 	else
@@ -367,7 +397,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	lidar_log_radius(polar_pts, polar_r, params.r_scale);
 
 	// Remove outliers (only for real frames)
-	if (false && params.motion_distortion)
+	if (params.motion_distortion)
 	{
 
 		// TODO: HERE modify outlier detection, using lidar angles
