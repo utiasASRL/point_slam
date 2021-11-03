@@ -1037,16 +1037,16 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 	// Get angles phi of each points for motion distorsion
 	vector<float> phis;
 	float phi1 = 0;
-	// if (params.motion_distortion)
-	// {
-	// 	phis.reserve(tgt_pts.size());
-	// 	for (auto& p : tgt_pts)
-	// 	{
-	// 		phis.push_back(fmod(3 * M_PI / 2 - atan2(p.y, p.x), 2 * M_PI));
-	// 		if (phis.back() > phi1)
-	// 			phi1 = phis.back();
-	// 	}
-	// }
+	if (params.motion_distortion)
+	{
+		phis.reserve(tgt_pts.size());
+		for (auto& p : tgt_pts)
+		{
+			phis.push_back(fmod(3 * M_PI / 2 - atan2(p.y, p.x), 2 * M_PI));
+			if (phis.back() > phi1)
+				phi1 = phis.back();
+		}
+	}
 
 	// Create search parameters
 	nanoflann::SearchParams search_params;
@@ -1199,6 +1199,7 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 		results.transform = H_icp * results.transform;
 
 		// Align targets taking motion distortion into account
+		
 		if (params.motion_distortion)
 		{	
 			// size_t iphi = 0;
@@ -1220,6 +1221,7 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 				aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;
 				i_inds++;
 			}
+			
 		}
 		else
 		{

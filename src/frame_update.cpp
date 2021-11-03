@@ -398,9 +398,8 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// Get subsampling of the frame in carthesian coordinates
 	vector<PointXYZ> sub_pts;
 	vector<size_t> sub_inds;
-
+	
 	grid_subsampling_centers(f_pts, sub_pts, sub_inds, params.frame_voxel_size);
-
 	t.push_back(std::clock());
 
 	// Convert sub_pts to polar and rescale
@@ -409,7 +408,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	vector<PointXYZ> polar_queries(polar_queries0);
 	lidar_log_radius(polar_queries, polar_r, params.r_scale);
 	lidar_horizontal_scale(polar_queries, params.h_scale);
-
+	
 	// ROS_WARN_STREAM(" ------> " << f_pts.size() << " " << sub_pts.size() << " " << sub_inds.size() << " " << params.frame_voxel_size);
 
 	/////////////////////
@@ -432,11 +431,12 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	vector<float> icp_scores(norm_scores);
 	smart_icp_score(polar_queries0, icp_scores);
 	smart_normal_score(sub_pts, polar_queries0, normals, norm_scores);
-
+	
 	// Remove points with a low score
 	float min_score = 0.01;
 	filter_pointcloud(sub_pts, norm_scores, min_score);
 	filter_pointcloud(normals, norm_scores, min_score);
+	filter_floatvector(sub_inds, norm_scores, min_score);
 	filter_floatvector(icp_scores, norm_scores, min_score);
 	filter_floatvector(norm_scores, min_score);
 
@@ -516,8 +516,8 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		size_t i_inds = 0;
 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
-		for (auto& ind : sub_inds){
-			float t = float(ind) / f_pts.size();
+ 		for (auto& ind : sub_inds){
+			float t = float(ind) / float(f_pts.size());
 			Eigen::Matrix4d H_rect = pose_interp(t, last_H, icp_results.transform, 0);		
 			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
 			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
@@ -574,12 +574,12 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		// }
 
 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)f_pts.data(), 3, f_pts.size());
-		for (auto& ind : sub_inds){
-			float t = float(ind) / f_pts.size();
+		for (int i = 0; i < f_pts.size(); i++){
+			float t = float(i) / float(f_pts.size());
 			Eigen::Matrix4d H_rect = pose_interp(t, last_H, icp_results.transform, 0);		
 			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
 			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
-			pts_mat.col(ind) = (R_rect * pts_mat.col(ind)) + T_rect;
+			pts_mat.col(i) = (R_rect * pts_mat.col(i)) + T_rect;
 			center.x = T_rect.x();
 			center.y = T_rect.y();
 			center.z = T_rect.z();
