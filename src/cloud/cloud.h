@@ -301,6 +301,7 @@ struct PointCloud
 // Utility function for pointclouds
 void filter_pointcloud(std::vector<PointXYZ>& pts, std::vector<float>& scores, float filter_value);
 // void filter_floatvector(std::vector<float>& vec, std::vector<float>& scores, float filter_value);
+
 template <class T>
 void filter_floatvector(std::vector<T>& vec, std::vector<float>& scores, float filter_value)
 {
@@ -320,6 +321,10 @@ void save_cloud(std::string dataPath, std::vector<PointXYZ>& points, std::vector
 void save_cloud(std::string dataPath, std::vector<PointXYZ>& points, std::vector<float>& features);
 void save_cloud(std::string dataPath, std::vector<PointXYZ>& points, std::vector<PointXYZ>& normals);
 void save_cloud(std::string dataPath, std::vector<PointXYZ>& points);
+
+// Debug save clouds
+// void save_cloud(std::string dataPath, std::vector<PointXYZ>& points, std::vector<size_t>& features);
+// void save_cloud(std::string dataPath, std::vector<PointXYZ>& points, std::vector<PointXYZ>& normals, std::vector<size_t>& features);
 
 void load_cloud(std::string& dataPath,
 	std::vector<PointXYZ>& points);

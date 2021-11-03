@@ -113,15 +113,6 @@ void filter_pointcloud(std::vector<PointXYZ>& pts, std::vector<float>& scores, f
 // 		vec.end());
 // }
 
-// template <class T>
-// void filter_floatvector(std::vector<T>& vec, std::vector<float>& scores, float filter_value)
-// {
-// 	// Remove every element whose score is < filter_value
-// 	auto vec_address = vec.data();
-// 	vec.erase(std::remove_if(vec.begin(), vec.end(),
-// 		[&scores, vec_address, filter_value](const T& f) { return scores[(size_t)(&f - vec_address)] < filter_value; }),
-// 		vec.end());
-// }
 
 void filter_floatvector(std::vector<float>& vec, float filter_value)
 {
@@ -176,6 +167,51 @@ void save_cloud(std::string dataPath,
 	file.write();
 }
 
+// Debug for sub_inds motion distortion
+// void save_cloud(std::string dataPath, 
+// 	std::vector<PointXYZ>& points, 
+// 	std::vector<PointXYZ>& normals, 
+// 	std::vector<size_t>& features)
+// {
+// 	// Variables
+// 	uint64_t num_points = points.size();
+// 	uint64_t num_normals = normals.size();
+// 	uint64_t num_features = features.size() / num_points;
+
+// 	// Safe check
+// 	if (num_features * num_points != features.size())
+// 	{
+// 		std::cout << "Warning: features dimension do not match point cloud" << std::endl;
+// 		std::cout << "         ply saving canceled" << std::endl;
+// 		return;
+// 	}
+// 	if (num_normals != num_points && num_normals != 0)
+// 	{
+// 		std::cout << "Warning: normal dimension do not match point cloud" << std::endl;
+// 		std::cout << "         ply saving canceled" << std::endl;
+// 		return;
+// 	}
+
+// 	// Open file
+// 	npm::PLYFileOut file(dataPath);
+
+// 	// Push fields
+// 	file.pushField(num_points, 3, npm::PLY_FLOAT, { "x", "y", "z" }, points);
+// 	if (num_normals > 0)
+// 		file.pushField(num_points, 3, npm::PLY_FLOAT, { "nx", "ny", "nz" }, normals);
+
+// 	std::vector<std::vector<size_t>> fields(num_features);
+// 	for (size_t i = 0; i < num_features; i++)
+// 	{
+// 		char buffer[100];
+// 		sprintf(buffer, "f%d", (int)i);
+// 		fields[i] = std::vector<size_t>(features.begin() + i * num_points, features.begin() + (i + 1) * num_points);
+// 		file.pushField(num_points, 1, npm::PLY_FLOAT, { std::string(buffer) }, fields[i]);
+// 	}
+// 	file.write();
+// }
+
+
 void save_cloud(std::string dataPath,
 	std::vector<PointXYZ>& points,
 	std::vector<PointXYZ>& normals)
@@ -192,6 +228,7 @@ void save_cloud(std::string dataPath,
 	save_cloud(dataPath, points, no_norms, features);
 }
 
+
 void save_cloud(std::string dataPath,
 	std::vector<PointXYZ>& points)
 {
@@ -200,7 +237,13 @@ void save_cloud(std::string dataPath,
 }
 
 
-
+// void save_cloud(std::string dataPath,
+// 	std::vector<PointXYZ>& points,
+// 	std::vector<size_t>& features)
+// {
+// 	std::vector<PointXYZ> no_norms;
+// 	save_cloud(dataPath, points, no_norms, features);
+// }
 
 
 

@@ -1094,6 +1094,13 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 	clock_str.push_back("Optimization .... ");
 	clock_str.push_back("Regularization .. ");
 	clock_str.push_back("Result .......... ");
+	
+	// // Debug (save map.cloud.pts)
+	// string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/";
+	// char buffer[100];
+	// sprintf(buffer, "cc_map.ply");
+	// string filepath = path + string(buffer);
+	// save_cloud(filepath, aligned, sub_inds);
 
 	for (size_t step = 0; step < max_it; step++)
 	{
@@ -1212,9 +1219,10 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 			// 	aligned_mat.col(iphi) = (phi_R * targets_mat.col(iphi)) + phi_T;
 			// 	iphi++;
 			// }
+			
 			size_t i_inds = 0;
 			for (auto& ind : sub_inds){
-				float t = float(ind) / float(N_total);
+				float t = float(ind) / float(N_total);  
 				Eigen::Matrix4d H_rect = pose_interp(t, last_H, results.transform, 0);		
 				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
 				Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
@@ -1301,7 +1309,11 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 		}
 
 
+		// Update the last pose
+		last_H = results.transform;
+
 		///////////// DEBUG /////////////
+		
 
 		//cout << "***********************" << endl;
 		//for (size_t i = 0; i < t.size() - 1; i++)
@@ -1324,12 +1336,14 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 		//cout << "dR = " << endl << T << endl;
 
 
-		//if (step % 3 == 0)
-		//{
-		//	char buffer[100];
-		//	sprintf(buffer, "cc_aligned_%03d.ply", (int)step * 0);
-		//	save_cloud(string(buffer), aligned, phis);
-		//}
+		// if (step % 3 == 0)
+		// {
+		// 	string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/";
+		// 	char buffer[100];
+		// 	sprintf(buffer, "cc_aligned_%03d.ply", (int)step / 3);
+		// 	string filepath = path + string(buffer);
+		// 	save_cloud(filepath, aligned, sub_inds);
+		// }
 
 
 	}

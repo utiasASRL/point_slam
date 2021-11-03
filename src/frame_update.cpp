@@ -365,7 +365,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 	// Remove outliers (only for real frames)
 	params.motion_distortion = true;
-	if (params.motion_distortion)
+	if (false)
 	{
 
 		// TODO: HERE modify outlier detection, using lidar angles
@@ -516,7 +516,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		size_t i_inds = 0;
 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
- 		for (auto& ind : sub_inds){
+		 for (auto& ind : sub_inds){
 			float t = float(ind) / float(f_pts.size());
 			Eigen::Matrix4d H_rect = pose_interp(t, last_H, icp_results.transform, 0);		
 			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
