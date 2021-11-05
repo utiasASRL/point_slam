@@ -331,6 +331,7 @@ void BundleICP(vector<PointXYZ>& points,
 	vector<float> mean_dR(B, 0);
 	size_t max_it = params.max_iter;
 	bool stop_cond = false;
+	bool stop_cond2 = false;
 
 
 	// Init result containers
