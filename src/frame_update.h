@@ -139,7 +139,6 @@ public:
 
 	// Map used by the algorithm
 	PointMap map;
-	
 
 	// Pose of the last mapped frame
 	Eigen::Matrix4d last_H;

@@ -140,6 +140,7 @@ bool npm::PLYFileOut::pushField(uint64_t num_pt, int dim, PLYType type,
   }
 
   if (in_expected_data_size != in_data_size) {
+    std::cout << "here " << typeSize(type) << " " << sizeof(T) << " " << data.size()<< std::endl;
     cout
     << "[PLYFileOut] error: field {";
     for(auto& p: properties) {cout << p << " ";}

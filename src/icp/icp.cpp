@@ -1037,6 +1037,7 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 	// Get angles phi of each points for motion distorsion
 	vector<float> phis;
 	float phi1 = 0;
+	params.motion_distortion = true;
 	if (params.motion_distortion)
 	{
 		phis.reserve(tgt_pts.size());
@@ -1219,10 +1220,9 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 			// 	aligned_mat.col(iphi) = (phi_R * targets_mat.col(iphi)) + phi_T;
 			// 	iphi++;
 			// }
-			
 			size_t i_inds = 0;
 			for (auto& ind : sub_inds){
-				float t = float(ind) / float(N_total);  
+				float t = float(ind) / float(N_total);
 				Eigen::Matrix4d H_rect = pose_interp(t, last_H, results.transform, 0);		
 				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
 				Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
@@ -1309,7 +1309,7 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 		}
 
 
-		// Update the last pose
+		// Update the previous pose
 		last_H = results.transform;
 
 		///////////// DEBUG /////////////
@@ -1334,15 +1334,19 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 		//Eigen::Vector3f T = H.block(0, 3, 3, 1);
 		//cout << "dT = " << endl << T << endl;
 		//cout << "dR = " << endl << T << endl;
-
-
-		// if (step % 3 == 0)
+		
+		// vector<float> sub_inds_debug;
+		// for (auto& i : sub_inds){
+		// 	sub_inds_debug.push_back(i);
+		// }
+		
+		// if (step % 1 == 0)
 		// {
 		// 	string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/";
 		// 	char buffer[100];
-		// 	sprintf(buffer, "cc_aligned_%03d.ply", (int)step / 3);
+		// 	sprintf(buffer, "cc_aligned_%03d.ply", (int)step / 1);
 		// 	string filepath = path + string(buffer);
-		// 	save_cloud(filepath, aligned, sub_inds);
+		// 	save_anycloud(filepath, aligned, sub_inds_debug);
 		// }
 
 
