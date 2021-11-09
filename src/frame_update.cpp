@@ -466,6 +466,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 	// Remove points with a low score
 	float min_score = 0.01;
+	min_score = -10000;
 	filter_pointcloud(sub_pts, norm_scores, min_score);
 	filter_pointcloud(normals, norm_scores, min_score);
 	filter_anyvector(sub_inds, norm_scores, min_score);
@@ -542,8 +543,6 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// vector<float> norm_scores_dist = norm_scores;
 	if (params.motion_distortion)
 	{
-		
-		
 		// Update map taking motion distortion into account
 		size_t i_inds = 0;
 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
@@ -587,7 +586,6 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	PointXYZ center;
 	if (params.motion_distortion)
 	{
-		throw std::invalid_argument("motion_distortion not handled yet");
 
 		// TODO: Here do not use the whole f_pts cloud
 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat_f((float *)f_pts.data(), 3, f_pts.size());

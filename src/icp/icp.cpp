@@ -1125,15 +1125,15 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 	clock_str.push_back("Result .......... ");
 
 	// // Debug (save map.cloud.pts)
-	string path = "/home/administrator/catkin_ws/src/point_slam/src/test_maps/test_ply/";
-	char buffer[100];
-	char buffer_check[100];
-	sprintf(buffer, "map_before_ICP_%03d.ply", int(count_iter));
-	sprintf(buffer_check, "aligned_before_ICP_%03d.ply", int(count_iter));
-	string filepath = path + string(buffer);
-	string filepath_check = path + string(buffer_check);
-	save_cloud(filepath, map.cloud.pts);
-	save_cloud(filepath_check, aligned, tgt_t);
+	// string path = "/home/administrator/catkin_ws/src/point_slam/src/test_maps/test_ply/";
+	// char buffer[100];
+	// char buffer_check[100];
+	// sprintf(buffer, "map_before_ICP_%03d.ply", int(count_iter));
+	// sprintf(buffer_check, "aligned_before_ICP_%03d.ply", int(count_iter));
+	// string filepath = path + string(buffer);
+	// string filepath_check = path + string(buffer_check);
+	// save_cloud(filepath, map.cloud.pts);
+	// save_cloud(filepath_check, aligned, tgt_t);
 
 	for (size_t step = 0; step < max_it; step++)
 	{
@@ -1362,17 +1362,17 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 		//cout << "dT = " << endl << T << endl;
 		//cout << "dR = " << endl << T << endl;
 		
-		if (step % 1 == 0)
-		{
-			string path = "/home/administrator/catkin_ws/src/point_slam/src/test_maps/test_ply/";
-			char buffer[100];
-			// char buffer_dist[100];
-			sprintf(buffer, "frame_undist_%03d_%03d.ply", (int)count_iter, int(step));
-			// sprintf(buffer_dist, "frame_dist_%03d_%03d.ply", (int)count_iter, int(step));
-			string filepath = path + string(buffer);
-			// string filepath_dist = path + string(buffer_dist);
-			save_cloud(filepath, aligned, tgt_t);
-		}
+		// if (step % 1 == 0)
+		// {
+		// 	string path = "/home/administrator/catkin_ws/src/point_slam/src/test_maps/test_ply/";
+		// 	char buffer[100];
+		// 	// char buffer_dist[100];
+		// 	sprintf(buffer, "frame_icp_%03d_%03d.ply", (int)count_iter, int(step));
+		// 	// sprintf(buffer_dist, "frame_dist_%03d_%03d.ply", (int)count_iter, int(step));
+		// 	string filepath = path + string(buffer);
+		// 	// string filepath_dist = path + string(buffer_dist);
+		// 	save_cloud(filepath, aligned, tgt_t);
+		// }
 
 
 		//if (step % 3 == 0)
