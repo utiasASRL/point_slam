@@ -81,6 +81,7 @@ public:
 	// ********
 
 	// Final transformation
+	Eigen::Matrix4d last_transform;
 	Eigen::Matrix4d transform;
 	Eigen::MatrixXd all_transforms;
 
@@ -94,6 +95,7 @@ public:
 	// Constructor
 	ICP_results()
 	{
+		last_transform = Eigen::Matrix4d::Identity(4, 4);
 		transform = Eigen::Matrix4d::Identity(4, 4);
 		all_transforms = Eigen::MatrixXd::Zero(4, 4);
 		all_rms = vector<float>();
@@ -152,7 +154,7 @@ void PointToMapICPDebug(vector<PointXYZ>& tgt_pts,
 	ICP_params& params,
 	ICP_results& results);
 
-void PointToMapICP(vector<PointXYZ>& tgt_pts,
+void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 	vector<float>& tgt_w,
 	PointMap& map,
 	ICP_params& params,

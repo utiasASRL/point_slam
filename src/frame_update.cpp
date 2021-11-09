@@ -397,7 +397,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	lidar_log_radius(polar_pts, polar_r, params.r_scale);
 
 	// Remove outliers (only for real frames)
-	if (params.motion_distortion)
+	if (false && params.motion_distortion)
 	{
 
 		// TODO: HERE modify outlier detection, using lidar angles
@@ -468,8 +468,20 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	float min_score = 0.01;
 	filter_pointcloud(sub_pts, norm_scores, min_score);
 	filter_pointcloud(normals, norm_scores, min_score);
-	filter_floatvector(icp_scores, norm_scores, min_score);
+	filter_anyvector(sub_inds, norm_scores, min_score);
+	filter_anyvector(icp_scores, norm_scores, min_score);
 	filter_floatvector(norm_scores, min_score);
+
+	// Get the motion_distorsion values from indices
+	vector<float> sub_ts;
+	if (params.motion_distortion)
+	{
+		sub_ts.reserve(sub_inds.size());
+		float inv_tot = 1.0 / (float)f_pts.size();
+		for (int j = 0; j < sub_inds.size(); j++)
+			sub_ts.push_back((float)sub_inds[j] * inv_tot);
+	}
+	
 
 	t.push_back(std::clock());
 
@@ -486,11 +498,17 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		// icp_results.transform = H_scannerToMap_init;
 		icp_results.transform = Eigen::Matrix4d::Identity();
 		icp_results.transform(2, 3) = 0.7;
+	
+		// initialize last transformation
+		icp_results.last_transform = Eigen::Matrix4d::Identity();
+		icp_results.last_transform(2, 3) = 0.7;
 	}
 	else
 	{
+		icp_results.last_transform = last_H;
 		params.icp_params.init_transform = H_scannerToMap_init;
-		PointToMapICP(sub_pts, icp_scores, map, params.icp_params, icp_results);
+		PointToMapICP(sub_pts, sub_ts, icp_scores, map, params.icp_params, icp_results);
+	
 	}
 
 	t.push_back(std::clock());
@@ -517,11 +535,28 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// Update the map //
 	////////////////////
 
+	// debug
+	// vector<PointXYZ> sub_pts_dist = sub_pts;
+	// vector<size_t> sub_inds_dist = sub_inds;
+	// vector<PointXYZ> normals_dist = normals;
+	// vector<float> norm_scores_dist = norm_scores;
 	if (params.motion_distortion)
 	{
-		throw std::invalid_argument("motion_distortion not handled yet");
-		// TODO Here:	- Handle case of motion distorsion
-		//				- USe point indices for interpolation
+		
+		
+		// Update map taking motion distortion into account
+		size_t i_inds = 0;
+		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
+		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
+		for (auto& t : sub_ts)
+		{
+			Eigen::Matrix4d H_rect = pose_interp(t, icp_results.last_transform, icp_results.transform, 0);		
+			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
+			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+			pts_mat.col(i_inds) = (R_rect * pts_mat.col(i_inds)) + T_rect;
+			norms_mat.col(i_inds) = (R_rect * norms_mat.col(i_inds));
+			i_inds++;
+		}
 	}
 	else
 	{
@@ -553,7 +588,19 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	if (params.motion_distortion)
 	{
 		throw std::invalid_argument("motion_distortion not handled yet");
-		// TODO: handle this case
+
+		// TODO: Here do not use the whole f_pts cloud
+		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat_f((float *)f_pts.data(), 3, f_pts.size());
+		for (int i = 0; i < f_pts.size(); i++){
+			float t = float(i) / float(f_pts.size());
+			Eigen::Matrix4d H_rect = pose_interp(t, icp_results.last_transform, icp_results.transform, 0);		
+			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
+			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+			pts_mat_f.col(i) = (R_rect * pts_mat_f.col(i)) + T_rect;
+			center.x = T_rect.x();
+			center.y = T_rect.y();
+			center.z = T_rect.z();
+		}
 	}
 	else
 	{

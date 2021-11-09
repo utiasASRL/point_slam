@@ -6,6 +6,9 @@
 // Utils
 // *****
 
+// global counter
+int count_iter = 0;
+
 void regu_pose_cycle(vector<Eigen::Matrix4d>& H, vector<float>& H_w)
 {
 	// Bundle regularization
@@ -1031,7 +1034,7 @@ void PointToMapICPDebug(vector<PointXYZ>& tgt_pts,
 }
 
 
-void PointToMapICP(vector<PointXYZ>& tgt_pts,
+void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 	vector<float>& tgt_w,
 	PointMap& map,
 	ICP_params& params,
@@ -1046,18 +1049,18 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts,
 	size_t first_steps = params.avg_steps / 2 + 1;
 
 	// Get angles phi of each points for motion distorsion
-	vector<float> phis;
-	float phi1 = 0;
-	if (params.motion_distortion)
-	{
-		phis.reserve(tgt_pts.size());
-		for (auto& p : tgt_pts)
-		{
-			phis.push_back(fmod(3 * M_PI / 2 - atan2(p.y, p.x), 2 * M_PI));
-			if (phis.back() > phi1)
-				phi1 = phis.back();
-		}
-	}
+	// vector<float> phis;
+	// float phi1 = 0;
+	// if (params.motion_distortion)
+	// {
+	// 	phis.reserve(tgt_pts.size());
+	// 	for (auto& p : tgt_pts)
+	// 	{
+	// 		phis.push_back(fmod(3 * M_PI / 2 - atan2(p.y, p.x), 2 * M_PI));
+	// 		if (phis.back() > phi1)
+	// 			phi1 = phis.back();
+	// 	}
+	// }
 
 	// Create search parameters
 	nanoflann::SearchParams search_params;
@@ -1077,10 +1080,25 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts,
 	Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> aligned_mat((float*)aligned.data(), 3, N);
 
 	// Apply initial transformation
-	Eigen::Matrix3f R_init = (params.init_transform.block(0, 0, 3, 3)).cast<float>();
-	Eigen::Vector3f T_init = (params.init_transform.block(0, 3, 3, 1)).cast<float>();
-	aligned_mat = (R_init * targets_mat).colwise() + T_init;
 	results.transform = params.init_transform;
+	if (params.motion_distortion)
+	{
+		size_t i_inds = 0;
+		for (auto& t : tgt_t)
+		{
+			Eigen::Matrix4d H_rect = pose_interp(t, results.last_transform, results.transform, 0);		
+			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
+			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+			aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;
+			i_inds++;
+		}
+	}
+	else
+	{
+		Eigen::Matrix3f R_tot = (results.transform.block(0, 0, 3, 3)).cast<float>();
+		Eigen::Vector3f T_tot = (results.transform.block(0, 3, 3, 1)).cast<float>();
+		aligned_mat = (R_tot * targets_mat).colwise() + T_tot;
+	}
 
 	// Random generator
 	default_random_engine generator;
@@ -1105,6 +1123,17 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts,
 	clock_str.push_back("Optimization .... ");
 	clock_str.push_back("Regularization .. ");
 	clock_str.push_back("Result .......... ");
+
+	// // Debug (save map.cloud.pts)
+	string path = "/home/administrator/catkin_ws/src/point_slam/src/test_maps/test_ply/";
+	char buffer[100];
+	char buffer_check[100];
+	sprintf(buffer, "map_before_ICP_%03d.ply", int(count_iter));
+	sprintf(buffer_check, "aligned_before_ICP_%03d.ply", int(count_iter));
+	string filepath = path + string(buffer);
+	string filepath_check = path + string(buffer_check);
+	save_cloud(filepath, map.cloud.pts);
+	save_cloud(filepath_check, aligned, tgt_t);
 
 	for (size_t step = 0; step < max_it; step++)
 	{
@@ -1201,8 +1230,6 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts,
 
 		t[4] = std::clock();
 
-		int cdsnjivs = 0;
-
 
 		//////////////////////////////////////
 		// Alignment with Motion distorsion //
@@ -1212,18 +1239,28 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts,
 		results.transform = H_icp * results.transform;
 
 		// Align targets taking motion distortion into account
+		
+		// debug Deep copies
+		// aligned_dist = aligned;
+		// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> aligned_mat_dist((float*)aligned_dist.data(), 3, N);
 		if (params.motion_distortion)
 		{
-			size_t iphi = 0;
-			for (auto& phi : phis)
+			
+			size_t i_inds = 0;
+			for (auto& t : tgt_t)
 			{
-				float t = (phi - params.init_phi) / (phi1 - params.init_phi);
-				Eigen::Matrix4d phi_H = pose_interp(t, params.init_transform, results.transform, 0);
-				Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
-				Eigen::Vector3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
-				aligned_mat.col(iphi) = (phi_R * targets_mat.col(iphi)) + phi_T;
-				iphi++;
+				Eigen::Matrix4d H_rect = pose_interp(t, results.last_transform, results.transform, 0);		
+				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
+				Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+				aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;
+				i_inds++;
 			}
+
+			// debug distorted
+			// Eigen::Matrix3f R_tot = (results.transform.block(0, 0, 3, 3)).cast<float>();
+			// Eigen::Vector3f T_tot = (results.transform.block(0, 3, 3, 1)).cast<float>();
+			// aligned_mat_dist = (R_tot * targets_mat).colwise() + T_tot;
+
 		}
 		else
 		{
@@ -1324,6 +1361,18 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts,
 		//Eigen::Vector3f T = H.block(0, 3, 3, 1);
 		//cout << "dT = " << endl << T << endl;
 		//cout << "dR = " << endl << T << endl;
+		
+		if (step % 1 == 0)
+		{
+			string path = "/home/administrator/catkin_ws/src/point_slam/src/test_maps/test_ply/";
+			char buffer[100];
+			// char buffer_dist[100];
+			sprintf(buffer, "frame_undist_%03d_%03d.ply", (int)count_iter, int(step));
+			// sprintf(buffer_dist, "frame_dist_%03d_%03d.ply", (int)count_iter, int(step));
+			string filepath = path + string(buffer);
+			// string filepath_dist = path + string(buffer_dist);
+			save_cloud(filepath, aligned, tgt_t);
+		}
 
 
 		//if (step % 3 == 0)
@@ -1371,9 +1420,8 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts,
 	//	cout << dH << endl;
 	//}
 
-
-
-
+	count_iter++;
+	
 
 }
 
