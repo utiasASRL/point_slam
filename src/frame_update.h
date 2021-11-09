@@ -48,6 +48,8 @@ Eigen::Matrix4d transformListenerToEigenMatrix(const tf::TransformListener& list
 Eigen::Matrix4d odomMsgToEigenMatrix(const nav_msgs::Odometry& odom);
 nav_msgs::Odometry eigenMatrixToOdomMsg(const Eigen::Matrix4d& inTr, const string& frame_id, const ros::Time& stamp);
 
+
+
 // SLAM params class
 // *****************
 
@@ -231,6 +233,9 @@ public:
 		file.pushField(num_poses, 4, npm::PLY_DOUBLE, {"rot_x", "rot_y", "rot_z", "rot_w"}, rots);
 		file.write();
 	}
+
+	// sad
+	float sad = 0;
 
 
 };

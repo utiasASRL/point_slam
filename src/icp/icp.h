@@ -157,7 +157,7 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 	vector<float>& tgt_w,
 	PointMap& map,
 	ICP_params& params,
-	ICP_results& results, Eigen::Matrix4d& last_H, int N_total);
+	ICP_results& results, Eigen::Matrix4d const& last_H, int N_total);
 
 void BundleICP(vector<PointXYZ>& points,
 	vector<PointXYZ>& normals,
