@@ -52,6 +52,10 @@ public:
 
 	// Initial transformation
 	Eigen::Matrix4d init_transform;
+	Eigen::Matrix4d last_transform0;
+	Eigen::Matrix4d last_transform1;
+	double last_stamp;
+	float last_time;
 
 	// Methods
 	// *******

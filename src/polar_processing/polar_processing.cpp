@@ -372,20 +372,18 @@ void smart_icp_score(vector<PointXYZ>& polar_pts,
 }
 
 
-void extract_lidar_frame_normals(vector<PointXYZ>& points,
-								 vector<PointXYZ>& polar_pts,
-								 vector<PointXYZ>& queries,
-								 vector<PointXYZ>& polar_queries,
-								 vector<PointXYZ>& normals,
-								 vector<float>& norm_scores,
-								 float polar_r)
+void extract_lidar_frame_normals(vector<PointXYZ> &points,
+								 vector<PointXYZ> &polar_pts,
+								 vector<PointXYZ> &queries,
+								 vector<PointXYZ> &polar_queries,
+								 vector<int> &polar_rings,
+								 vector<PointXYZ> &normals,
+								 vector<float> &norm_scores,
+								 vector<float> &polar_r2s)
 {
 
 	// Initialize variables
 	// ********************
-
-	// Squared search radius
-	float r2 = polar_r * polar_r;
 
 	// Result vectors
 	normals = vector<PointXYZ>(polar_queries.size(), PointXYZ());
@@ -428,7 +426,8 @@ void extract_lidar_frame_normals(vector<PointXYZ>& points,
 
 		// Find neighbors
 		float query_pt[3] = {polar_queries[i].x, polar_queries[i].y, polar_queries[i].z};
-		size_t n_neighbs = index->radiusSearch(query_pt, r2, inds_dists, search_params);
+		size_t ring_i = polar_rings[i];
+		size_t n_neighbs = index->radiusSearch(query_pt, polar_r2s[ring_i], inds_dists, search_params);
 
 		// Update max count
 		if (n_neighbs > max_neighbs)

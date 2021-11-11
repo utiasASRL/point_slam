@@ -1042,7 +1042,6 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 {
 	// Parameters
 	// **********
-
 	size_t N = tgt_pts.size();
 	float max_pair_d2 = params.max_pairing_dist * params.max_pairing_dist;
 	float max_planar_d = params.max_planar_dist;
@@ -1083,14 +1082,14 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 	results.transform = params.init_transform;
 	if (params.motion_distortion)
 	{
-		size_t i_inds = 0;
-		for (auto& t : tgt_t)
-		{
-			Eigen::Matrix4d H_rect = pose_interp(t, results.last_transform, results.transform, 0);		
-			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
-			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
-			aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;
-			i_inds++;
+		size_t i_inds = 0;	
+		for (auto& t : tgt_t)	
+		{	
+			Eigen::Matrix4d H_rect = pose_interp(t, params.last_transform0, results.transform, 0);			
+			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();	
+			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();	
+			aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;	
+			i_inds++;	
 		}
 	}
 	else
@@ -1126,14 +1125,15 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 
 	// // Debug (save map.cloud.pts)
 	// string path = "/home/administrator/catkin_ws/src/point_slam/src/test_maps/test_ply/";
-	// char buffer[100];
-	// char buffer_check[100];
-	// sprintf(buffer, "map_before_ICP_%03d.ply", int(count_iter));
-	// sprintf(buffer_check, "aligned_before_ICP_%03d.ply", int(count_iter));
-	// string filepath = path + string(buffer);
-	// string filepath_check = path + string(buffer_check);
-	// save_cloud(filepath, map.cloud.pts);
-	// save_cloud(filepath_check, aligned, tgt_t);
+	string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/"; 
+	char buffer[100];
+	char buffer_check[100];
+	sprintf(buffer, "map_before_ICP_%03d.ply", int(count_iter));
+	sprintf(buffer_check, "aligned_before_ICP_%03d.ply", int(count_iter));
+	string filepath = path + string(buffer);
+	string filepath_check = path + string(buffer_check);
+	save_cloud(filepath, map.cloud.pts);
+	save_cloud(filepath_check, aligned, tgt_t);
 
 	for (size_t step = 0; step < max_it; step++)
 	{
@@ -1245,22 +1245,15 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 		// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> aligned_mat_dist((float*)aligned_dist.data(), 3, N);
 		if (params.motion_distortion)
 		{
-			
-			size_t i_inds = 0;
-			for (auto& t : tgt_t)
-			{
-				Eigen::Matrix4d H_rect = pose_interp(t, results.last_transform, results.transform, 0);		
-				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
-				Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
-				aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;
-				i_inds++;
+			size_t i_inds = 0;	
+			for (auto& t : tgt_t)	
+			{	
+				Eigen::Matrix4d H_rect = pose_interp(t, params.last_transform0, results.transform, 0);			
+				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();	
+				Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();	
+				aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;	
+				i_inds++;	
 			}
-
-			// debug distorted
-			// Eigen::Matrix3f R_tot = (results.transform.block(0, 0, 3, 3)).cast<float>();
-			// Eigen::Vector3f T_tot = (results.transform.block(0, 3, 3, 1)).cast<float>();
-			// aligned_mat_dist = (R_tot * targets_mat).colwise() + T_tot;
-
 		}
 		else
 		{
@@ -1362,17 +1355,18 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 		//cout << "dT = " << endl << T << endl;
 		//cout << "dR = " << endl << T << endl;
 		
-		// if (step % 1 == 0)
-		// {
-		// 	string path = "/home/administrator/catkin_ws/src/point_slam/src/test_maps/test_ply/";
-		// 	char buffer[100];
-		// 	// char buffer_dist[100];
-		// 	sprintf(buffer, "frame_icp_%03d_%03d.ply", (int)count_iter, int(step));
-		// 	// sprintf(buffer_dist, "frame_dist_%03d_%03d.ply", (int)count_iter, int(step));
-		// 	string filepath = path + string(buffer);
-		// 	// string filepath_dist = path + string(buffer_dist);
-		// 	save_cloud(filepath, aligned, tgt_t);
-		// }
+		if (step % 1 == 0)
+		{
+			// string path = "/home/administrator/catkin_ws/src/point_slam/src/test_maps/test_ply/";
+			string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/";
+			char buffer[100];
+			// char buffer_dist[100];
+			sprintf(buffer, "frame_icp_%03d_%03d.ply", (int)count_iter, int(step));
+			// sprintf(buffer_dist, "frame_dist_%03d_%03d.ply", (int)count_iter, int(step));
+			string filepath = path + string(buffer);
+			// string filepath_dist = path + string(buffer_dist);
+			save_cloud(filepath, aligned, tgt_t);
+		}
 
 
 		//if (step % 3 == 0)

@@ -74,6 +74,11 @@ public:
 	// Account for motion distorsion (fasle in the case of simulated data)
 	bool motion_distortion;
 
+	// normal computation parameters
+	vector<float> polar_r2s;
+	float polar_r;
+
+
 	// Transformation matrix from velodyne frame to base frame
 	Eigen::Matrix4d H_velo_base;
 
@@ -107,7 +112,7 @@ public:
 		lidar_n_lines = 32;
 		map_voxel_size = 0.08;
 		frame_voxel_size = 0.16;
-		motion_distortion = false;
+		motion_distortion = true;
 		H_velo_base = Eigen::Matrix4d::Identity(4, 4);
 
 		h_scale = 0.5;

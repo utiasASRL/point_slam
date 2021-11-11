@@ -226,6 +226,8 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	//////////////////////
 	// Optional verbose //
 	//////////////////////
+	// set motion distortion (remove later)
+	params.motion_distortion = false;
 
 	params.verbose = 0;
 
@@ -244,9 +246,9 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		clock_str.push_back("Normals filter .... ");
 		clock_str.push_back("ICP localization .. ");
 		clock_str.push_back("Publish tf ........ ");
-		clock_str.push_back("Align frame ....... ");
+		clock_str.push_back("Align sub_pts ..... ");
 		clock_str.push_back("Map update ........ ");
-		clock_str.push_back("Ground extract .... ");
+		clock_str.push_back("Align f_pts ....... ");
 		clock_str.push_back("Map2D update ...... ");
 		clock_str.push_back("Map2D publish ..... ");
 	}
@@ -270,19 +272,25 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	}
 
 	// Loop over points and copy in vector container. Do the filtering if necessary
-	float tan_theta2;
-	float last_tan_theta2 = 0;
+	// float tan_theta2;
+	// float last_tan_theta2 = 0;
+	ushort last_ring = 0;
 	int scan_col = 0;
 	bool using_col = false;
 	int col_stride = 3;
 	vector<PointXYZ> f_pts;
+	vector<float> f_ts;
+	vector<ushort> f_rings;
+	
+	
 	f_pts.reserve(N);
 	if (filtering)
 	{
-		sensor_msgs::PointCloud2ConstIterator<float> iter_i(*msg, "intensity"), iter_x(*msg, "x"), iter_y(*msg, "y");
+		sensor_msgs::PointCloud2ConstIterator<float> iter_i(*msg, "intensity"), iter_x(*msg, "x"), iter_y(*msg, "y"), iter_time(*msg, "time");
+		sensor_msgs::PointCloud2ConstIterator<ushort> iter_ring(*msg, "ring");
 		for (sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
 			 iter_z != iter_z.end();
-			 ++iter_x, ++iter_y, ++iter_z, ++iter_i)
+			 ++iter_x, ++iter_y, ++iter_z, ++iter_i, ++iter_ring, ++iter_time)
 		{
 			// Reject points with wrong labels
 			if (find(params.loc_labels.begin(), params.loc_labels.end(), (int)*iter_i) == params.loc_labels.end())
@@ -301,14 +309,28 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	}
 	else if (col_stride > 1)
 	{
-		for (sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x"), iter_y(*msg, "y"), iter_z(*msg, "z");
-			 iter_x != iter_x.end();
-			 ++iter_x, ++iter_y, ++iter_z)
+		sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x"), iter_y(*msg, "y"), iter_time(*msg, "time");
+		sensor_msgs::PointCloud2ConstIterator<ushort> iter_ring(*msg, "ring");
+		for (sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
+			 iter_z != iter_z.end();
+			 ++iter_x, ++iter_y, ++iter_z, ++iter_ring, ++iter_time)
 		{
+			// // Eliminate according to angle theta
+			// tan_theta2 = *iter_z * *iter_z / (*iter_x * *iter_x + *iter_x * *iter_x);
+			// if (tan_theta2 < last_tan_theta2)
+			// {
+			// 	if (++scan_col >= col_stride)
+			// 	{
+			// 		scan_col = 0;
+			// 		using_col = true;
+			// 	}
+			// 	else
+			// 		using_col = false;
+			// }
+			// last_tan_theta2 = tan_theta2;
 
 			// Eliminate according to angle theta
-			tan_theta2 = *iter_z * *iter_z / (*iter_x * *iter_x + *iter_x * *iter_x);
-			if (tan_theta2 < last_tan_theta2)
+			if (*iter_ring < last_ring)
 			{
 				if (++scan_col >= col_stride)
 				{
@@ -318,22 +340,30 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 				else
 					using_col = false;
 			}
-			last_tan_theta2 = tan_theta2;
+			last_ring = *iter_ring;
 			
 
 			// Add all points to the vector container
 			if (using_col)
+			{
 				f_pts.push_back(PointXYZ(*iter_x, *iter_y, *iter_z));
+				f_ts.push_back(*iter_time);
+				f_rings.push_back(*iter_ring);
+			}
 		}
 	}
 	else
 	{
-		for (sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x"), iter_y(*msg, "y"), iter_z(*msg, "z");
-			 iter_x != iter_x.end();
-			 ++iter_x, ++iter_y, ++iter_z)
+		sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x"), iter_y(*msg, "y"), iter_time(*msg, "time");
+		sensor_msgs::PointCloud2ConstIterator<ushort> iter_ring(*msg, "ring");
+		for (sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
+			 iter_z != iter_z.end();
+			 ++iter_x, ++iter_y, ++iter_z, ++iter_ring, ++iter_time)
 		{
 			// Add all points to the vector container
 			f_pts.push_back(PointXYZ(*iter_x, *iter_y, *iter_z));
+			f_ts.push_back(*iter_time);
+			f_rings.push_back(*iter_ring);
 		}
 	}
 
@@ -378,52 +408,60 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 	t.push_back(std::clock());
 
-	// Get lidar angle resolution
-	float minTheta, maxTheta;
-	float lidar_angle_res = get_lidar_angle_res(polar_pts, minTheta, maxTheta, params.lidar_n_lines);
+	// Get angle for each lidar point, and the corresponding polar_r2
+	if (params.polar_r2s.size() < 1)
+	{
+		vector<float> lidar_angles;
+		get_lidar_angles(polar_pts, lidar_angles, params.lidar_n_lines);
+		params.polar_r2s.reserve(lidar_angles.size());
+		int j = 0;
+		float tmp = 1.5 * (lidar_angles[j + 1] - lidar_angles[j]);
+		params.polar_r2s.push_back(tmp * tmp);
+		j++;
+		while (j < lidar_angles.size() - 1)
+		{
+			tmp = 1.5 * min(lidar_angles[j+1] - lidar_angles[j], lidar_angles[j] - lidar_angles[j-1]);
+			params.polar_r2s.push_back(tmp * tmp);
+			j++;
+		}
+		tmp = 1.5 * (lidar_angles[j] - lidar_angles[j-1]);
+		params.polar_r2s.push_back(tmp * tmp);
 
-	// Get angle for each lidar point
-	vector<float> lidar_angles;
-	get_lidar_angles(polar_pts, lidar_angles, params.lidar_n_lines);
-
-	// ROS_WARN_STREAM(" ---> Found " << lidar_angles.size() << " angles");
-	// for (auto a: lidar_angles)
-	// 	ROS_WARN_STREAM(" ------> " << a);
-
-	// Define the polar neighbors radius in the scaled polar coordinates
-	float polar_r = 1.5 * lidar_angle_res;
+		// Get lidar angle resolution
+		float minTheta, maxTheta;
+		float lidar_angle_res = get_lidar_angle_res(polar_pts, minTheta, maxTheta, params.lidar_n_lines);
+		params.polar_r = 1.5 * lidar_angle_res;
+	}
 
 	// Apply log scale to radius coordinate (in place)
-	lidar_log_radius(polar_pts, polar_r, params.r_scale);
+	lidar_log_radius(polar_pts, params.polar_r, params.r_scale);
 
-	// Remove outliers (only for real frames)
-	if (false && params.motion_distortion)
-	{
+	// // Remove outliers (only for real frames)
+	// if (params.motion_distortion)
+	// {
 
-		// TODO: HERE modify outlier detection, using lidar angles
-		//			reduce the number of operations done by saving dtheta_min, in variable for example
+	// 	// TODO: HERE modify outlier detection, using lidar angles
+	// 	//			reduce the number of operations done by saving dtheta_min, in variable for example
 
-		// TODO: ALSO we need to modify the radius neighbor to adapt the radius to each ring
+	// 	string path = "/home/administrator/1-Deep-Collider/results/test_ptmap/";
+	// 	char buffer[200];
+	// 	sprintf(buffer, "debug_rtp_%05d.ply", n_frames);
+	// 	string filepath = path + string(buffer);
+	// 	save_cloud(filepath, polar_pts);
 
-		string path = "/home/administrator/1-Deep-Collider/results/test_ptmap/";
-		char buffer[200];
-		sprintf(buffer, "debug_rtp_%05d.ply", n_frames);
-		string filepath = path + string(buffer);
-		save_cloud(filepath, polar_pts);
+	// 	// Get an outlier score
+	// 	vector<float> scores(polar_pts.size(), 0.0);
+	// 	detect_outliers(polar_pts, scores, params.lidar_n_lines, lidar_angles, minTheta, params.outl_rjct_passes, params.outl_rjct_thresh);
 
-		// Get an outlier score
-		vector<float> scores(polar_pts.size(), 0.0);
-		detect_outliers(polar_pts, scores, params.lidar_n_lines, lidar_angles, minTheta, params.outl_rjct_passes, params.outl_rjct_thresh);
+	// 	// Remove points with negative score
+	// 	filter_pointcloud(f_pts, scores, 0);
+	// 	filter_pointcloud(polar_pts, scores, 0);
 
-		// Remove points with negative score
-		filter_pointcloud(f_pts, scores, 0);
-		filter_pointcloud(polar_pts, scores, 0);
-
-		char buffer2[200];
-		sprintf(buffer2, "clean_rtp_%05d.ply", n_frames);
-		string filepath2 = path + string(buffer2);
-		save_cloud(filepath2, polar_pts);
-	}
+	// 	char buffer2[200];
+	// 	sprintf(buffer2, "clean_rtp_%05d.ply", n_frames);
+	// 	string filepath2 = path + string(buffer2);
+	// 	save_cloud(filepath2, polar_pts);
+	// }
 
 	t.push_back(std::clock());
 
@@ -438,7 +476,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	vector<PointXYZ> polar_queries0(sub_pts);
 	cart2pol_(polar_queries0);
 	vector<PointXYZ> polar_queries(polar_queries0);
-	lidar_log_radius(polar_queries, polar_r, params.r_scale);
+	lidar_log_radius(polar_queries, params.polar_r, params.r_scale);
 	lidar_horizontal_scale(polar_queries, params.h_scale);
 
 	// ROS_WARN_STREAM(" ------> " << f_pts.size() << " " << sub_pts.size() << " " << sub_inds.size() << " " << params.frame_voxel_size);
@@ -454,8 +492,14 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// Apply horizontal scaling (to have smaller neighborhoods in horizontal direction)
 	lidar_horizontal_scale(polar_pts, params.h_scale);
 
+	// Get sub_rings
+	vector<int> sub_rings;
+	sub_rings.reserve(sub_inds.size());
+	for (int j = 0; j < sub_inds.size(); j++)
+		sub_rings.push_back((int)f_rings[sub_inds[j]]);
+
 	// Call polar processing function
-	extract_lidar_frame_normals(f_pts, polar_pts, sub_pts, polar_queries, normals, norm_scores, polar_r);
+	extract_lidar_frame_normals(f_pts, polar_pts, sub_pts, polar_queries, sub_rings, normals, norm_scores, params.polar_r2s);
 
 	t.push_back(std::clock());
 
@@ -472,16 +516,42 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	filter_anyvector(sub_inds, norm_scores, min_score);
 	filter_anyvector(icp_scores, norm_scores, min_score);
 	filter_floatvector(norm_scores, min_score);
+	
+	// Min and max times (dont loop on the whole frame as it is useless)
+	float loop_ratio = 0.01;
+	float t_min = f_ts[0];
+	float t_max = f_ts[0];
+	for (int j = 0; (float)j < loop_ratio * (float)f_ts.size();  j++)
+	{
+		if (f_ts[j] < t_min)
+			t_min = f_ts[j];
+	}
+	for (int j = (int)floor((1 - loop_ratio) * f_ts.size()); j < f_ts.size();  j++)
+	{
+		if (f_ts[j] > t_max)
+			t_max = f_ts[j];
+	}
+	
+	// Initial interpolation time
+	float t0;
+	if (map.size() < 1 || params.icp_params.max_iter < 1)
+		t0 = t_min - (t_max - t_min);
+	else
+		t0 = params.icp_params.last_time + (float)(latest_stamp.toSec() - stamp.toSec());
 
-	// Get the motion_distorsion values from indices
-	vector<float> sub_ts;
+
+
+	// Get the motion_distorsion values from timestamps
+	// 0 for t0 (old t_min) and 1 for t_max
+	vector<float> sub_alphas;
 	if (params.motion_distortion)
 	{
-		sub_ts.reserve(sub_inds.size());
-		float inv_tot = 1.0 / (float)f_pts.size();
+		float inv_factor = 1 / (t_max - t0);
+		sub_alphas.reserve(sub_inds.size());
 		for (int j = 0; j < sub_inds.size(); j++)
-			sub_ts.push_back((float)sub_inds[j] * inv_tot);
+			sub_alphas.push_back((f_ts[sub_inds[j]] - t0) * inv_factor);
 	}
+
 	
 
 	t.push_back(std::clock());
@@ -501,15 +571,14 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		icp_results.transform(2, 3) = 0.7;
 	
 		// initialize last transformation
-		icp_results.last_transform = Eigen::Matrix4d::Identity();
-		icp_results.last_transform(2, 3) = 0.7;
+		params.icp_params.last_transform0 = icp_results.transform;
+		params.icp_params.last_transform1 = icp_results.transform;
+		params.icp_params.last_time = t_min;
 	}
 	else
 	{
-		icp_results.last_transform = last_H;
-		params.icp_params.init_transform = H_scannerToMap_init;
-		PointToMapICP(sub_pts, sub_ts, icp_scores, map, params.icp_params, icp_results);
-	
+		params.icp_params.init_transform = params.icp_params.last_transform1;
+		PointToMapICP(sub_pts, sub_alphas, icp_scores, map, params.icp_params, icp_results);
 	}
 
 	t.push_back(std::clock());
@@ -517,11 +586,15 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	///////////////////////
 	// Publish transform //
 	///////////////////////
+	
+	// Update the last pose for future frames
+	float alpha0 = (t_min - t0) / (t_max - t0);
+	Eigen::Matrix4d new_H_scannerToMap = pose_interp(alpha0, params.icp_params.last_transform0, icp_results.transform, 0);
 
 	// Compute tf
 	//publishStamp = stamp;
 	//publishLock.lock();
-	H_OdomToMap = icp_results.transform * H_OdomToScanner;
+	H_OdomToMap = new_H_scannerToMap * H_OdomToScanner;
 
 	// Publish tf
 	if (stamp > latest_stamp)
@@ -536,35 +609,33 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// Update the map //
 	////////////////////
 
-	// debug
-	// vector<PointXYZ> sub_pts_dist = sub_pts;
-	// vector<size_t> sub_inds_dist = sub_inds;
-	// vector<PointXYZ> normals_dist = normals;
-	// vector<float> norm_scores_dist = norm_scores;
-	if (params.motion_distortion)
+	if (update_map)
 	{
-		// Update map taking motion distortion into account
-		size_t i_inds = 0;
-		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
-		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
-		for (auto& t : sub_ts)
+		if (params.motion_distortion)
 		{
-			Eigen::Matrix4d H_rect = pose_interp(t, icp_results.last_transform, icp_results.transform, 0);		
-			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
-			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
-			pts_mat.col(i_inds) = (R_rect * pts_mat.col(i_inds)) + T_rect;
-			norms_mat.col(i_inds) = (R_rect * norms_mat.col(i_inds));
-			i_inds++;
+			// Update map taking motion distortion into account
+			size_t i_inds = 0;
+			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
+			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
+			for (auto& alpha : sub_alphas)
+			{
+				Eigen::Matrix4d H_rect = pose_interp(alpha, params.icp_params.last_transform0, icp_results.transform, 0);
+				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
+				Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+				pts_mat.col(i_inds) = (R_rect * pts_mat.col(i_inds)) + T_rect;
+				norms_mat.col(i_inds) = (R_rect * norms_mat.col(i_inds));
+				i_inds++;
+			}
 		}
-	}
-	else
-	{
-		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
-		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
-		Eigen::Matrix3f R_tot = (icp_results.transform.block(0, 0, 3, 3)).cast<float>();
-		Eigen::Vector3f T_tot = (icp_results.transform.block(0, 3, 3, 1)).cast<float>();
-		pts_mat = (R_tot * pts_mat).colwise() + T_tot;
-		norms_mat = R_tot * norms_mat;
+		else
+		{
+			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
+			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
+			Eigen::Matrix3f R_tot = (icp_results.transform.block(0, 0, 3, 3)).cast<float>();
+			Eigen::Vector3f T_tot = (icp_results.transform.block(0, 3, 3, 1)).cast<float>();
+			pts_mat = (R_tot * pts_mat).colwise() + T_tot;
+			norms_mat = R_tot * norms_mat;
+		}
 	}
 
 	t.push_back(std::clock());
@@ -577,70 +648,89 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 	t.push_back(std::clock());
 
-	// Detect ground plane for height filtering
-	Plane3D ground_P = extract_ground(sub_pts, normals);
+	// Update the 2D map
+	PointXYZ center;
+	if (update_map)
+	{
+		if (params.motion_distortion)
+		{
+			// TODO: Here do not use the whole f_pts cloud
+			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat_f((float *)f_pts.data(), 3, f_pts.size());
+			float inv_factor = 1 / (t_max - t0);
+			for (int i = 0; i < f_pts.size(); i++)
+			{
+				float alpha = (f_ts[i] - t0) * inv_factor;
+				Eigen::Matrix4d H_rect = pose_interp(alpha, params.icp_params.last_transform0, icp_results.transform, 0);	
+				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
+				Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+				pts_mat_f.col(i) = (R_rect * pts_mat_f.col(i)) + T_rect;
+				center.x = T_rect.x();
+				center.y = T_rect.y();
+				center.z = T_rect.z();
+			}
+		}
+		else
+		{
+			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)f_pts.data(), 3, f_pts.size());
+			Eigen::Matrix3f R_tot = (icp_results.transform.block(0, 0, 3, 3)).cast<float>();
+			Eigen::Vector3f T_tot = (icp_results.transform.block(0, 3, 3, 1)).cast<float>();
+			pts_mat = (R_tot * pts_mat).colwise() + T_tot;
+			center.x = T_tot.x();
+			center.y = T_tot.y();
+			center.z = T_tot.z();
+		}
+	}
 
 	t.push_back(std::clock());
 
-	// Update the 2D map
-	PointXYZ center;
-	if (params.motion_distortion)
+	if (update_map || map2D.size() < 1)
 	{
 
-		// TODO: Here do not use the whole f_pts cloud
-		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat_f((float *)f_pts.data(), 3, f_pts.size());
-		for (int i = 0; i < f_pts.size(); i++){
-			float t = float(i) / float(f_pts.size());
-			Eigen::Matrix4d H_rect = pose_interp(t, icp_results.last_transform, icp_results.transform, 0);		
-			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
-			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
-			pts_mat_f.col(i) = (R_rect * pts_mat_f.col(i)) + T_rect;
-			center.x = T_rect.x();
-			center.y = T_rect.y();
-			center.z = T_rect.z();
-		}
-	}
-	else
-	{
-		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)f_pts.data(), 3, f_pts.size());
-		Eigen::Matrix3f R_tot = (icp_results.transform.block(0, 0, 3, 3)).cast<float>();
-		Eigen::Vector3f T_tot = (icp_results.transform.block(0, 3, 3, 1)).cast<float>();
-		pts_mat = (R_tot * pts_mat).colwise() + T_tot;
-		center.x = T_tot.x();
-		center.y = T_tot.y();
-		center.z = T_tot.z();
+		// Detect ground plane for height filtering
+		Plane3D ground_P = extract_ground(sub_pts, normals);
+
+		// Update 2D map
+		map2D.update_from_3D(f_pts, center, ground_P, params.map2d_zMin, params.map2d_zMax);
 	}
 
 	// DEBUG ////////////////////////////
 
-	// if (map2D.size() > 0 && n_frames % 1 == 0)
-	// {
-	// 	string path = "/home/administrator/1-Deep-Collider/results/test_ptmap/";
-	// 	char buffer[200];
-	// 	sprintf(buffer, "debug_frame_%05d.ply", n_frames);
-	// 	string filepath = path + string(buffer);
-	// 	vector<float> distances;
-	// 	ground_P.point_distances(f_pts, distances);
-	// 	save_cloud(filepath, f_pts, distances);
+	if (map2D.size() > 0 && n_frames % 1 == 0)
+	{
+		// string path = "/home/administrator/1-Deep-Collider/results/test_ptmap/";
+		string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/";
+		char buffer[200];
+		sprintf(buffer, "debug_frame_%05d.ply", n_frames);
+		string filepath = path + string(buffer);
+		vector<float> distances;
+		// ground_P.point_distances(f_pts, distances);
+		// save_cloud(filepath, f_pts, distances);
+		save_cloud(filepath, f_pts);
 
-	// 	map.debug_save_ply(path, n_frames);
-	// 	map2D.debug_save_ply(path, n_frames);
+		map.debug_save_ply(path, n_frames);
+		map2D.debug_save_ply(path, n_frames);
 
-	// 	ROS_WARN_STREAM(">>>>>>>>>>>>> " << n_frames << ": " << ground_P.u << " " << ground_P.d);
-	// }
+		// ROS_WARN_STREAM(">>>>>>>>>>>>> " << n_frames << ": " << ground_P.u << " " << ground_P.d);
+	}
 
 	/////////////////////////////////////
-
-	if (update_map || map2D.size() < 1)
-	{
-		map2D.update_from_3D(f_pts, center, ground_P, params.map2d_zMin, params.map2d_zMax);
-	}
 
 	t.push_back(std::clock());
 
 	publish_2D_map();
 
 	t.push_back(std::clock());
+	
+	// Update the last pose for future frames
+	if (stamp > latest_stamp)
+	{
+		params.icp_params.last_transform1 = icp_results.transform;
+		params.icp_params.last_transform0 = new_H_scannerToMap;
+		params.icp_params.last_time = t_min;
+	}
+
+	// Update the pose correction from map to odom
+	H_OdomToMap = params.icp_params.last_transform1 * H_OdomToScanner;
 
 	// Update the last pose for future frames
 	last_H = icp_results.transform;
@@ -854,11 +944,13 @@ int main(int argc, char **argv)
 	string start_time;
 	if (!nh.getParam("start_time", start_time))
 	{
-		slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/tmp/";
+		// slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/tmp/";
+		slam_params.log_path = "/home/" + user_name + "/catkin_ws/src/point_slam_2/src/test_maps/logs/";
 	}
 	else
 	{
-		slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/";
+		// slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/";
+		slam_params.log_path = "/home/" + user_name + "/catkin_ws/src/point_slam_2/src/test_maps/logs/";
 		slam_params.log_path += start_time + "/logs-" + start_time + "/";
 	}
 
