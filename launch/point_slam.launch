@@ -22,7 +22,7 @@
     <param name="map2d_max_count" value="50"/>
     <param name="map2d_z_min" value="0.2"/>
     <param name="map2d_z_max" value="1.2"/>
-    <param name="motion_distortion" value="false"/>
+    <param name="motion_distortion" value="true"/>
     <param name="lidar_n_lines" value="32"/>
 
     <!-- <param name="init_map_day" value="2020-10-02-13-39-05"/> -->

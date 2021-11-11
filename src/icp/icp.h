@@ -10,8 +10,8 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
-#include <Eigen/Eigenvalues>
 #include "../cloud/cloud.h"
+#include <Eigen/Eigenvalues>
 
 # include "../pointmap/pointmap.h"
 
@@ -49,10 +49,13 @@ public:
 	// For motion distortion, angle phi of the last transform
 	float init_phi;
 	bool motion_distortion;
-	// vector<float> phis;
 
 	// Initial transformation
 	Eigen::Matrix4d init_transform;
+	Eigen::Matrix4d last_transform0;
+	Eigen::Matrix4d last_transform1;
+	double last_stamp;
+	float last_time;
 
 	// Methods
 	// *******
@@ -68,7 +71,7 @@ public:
 		rotDiffThresh = 0.1 * M_PI / 180.0;
 		transDiffThresh = 0.01;
 		init_phi = 0.0;
-		motion_distortion = true;
+		motion_distortion = false;
 		init_transform = Eigen::Matrix4d::Identity(4, 4);
 	}
 };
@@ -82,6 +85,7 @@ public:
 	// ********
 
 	// Final transformation
+	Eigen::Matrix4d last_transform;
 	Eigen::Matrix4d transform;
 	Eigen::MatrixXd all_transforms;
 
@@ -95,6 +99,7 @@ public:
 	// Constructor
 	ICP_results()
 	{
+		last_transform = Eigen::Matrix4d::Identity(4, 4);
 		transform = Eigen::Matrix4d::Identity(4, 4);
 		all_transforms = Eigen::MatrixXd::Zero(4, 4);
 		all_rms = vector<float>();
@@ -153,11 +158,11 @@ void PointToMapICPDebug(vector<PointXYZ>& tgt_pts,
 	ICP_params& params,
 	ICP_results& results);
 
-void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
+void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 	vector<float>& tgt_w,
 	PointMap& map,
 	ICP_params& params,
-	ICP_results& results, Eigen::Matrix4d const& last_H, int N_total);
+	ICP_results& results);
 
 void BundleICP(vector<PointXYZ>& points,
 	vector<PointXYZ>& normals,

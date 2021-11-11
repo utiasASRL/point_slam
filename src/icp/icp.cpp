@@ -1,9 +1,11 @@
+
 #include "icp.h"
 
 
 
 // Utils
 // *****
+
 // global counter
 int count_iter = 0;
 
@@ -332,6 +334,7 @@ void BundleICP(vector<PointXYZ>& points,
 	vector<float> mean_dR(B, 0);
 	size_t max_it = params.max_iter;
 	bool stop_cond = false;
+	bool stop_cond2 = false;
 
 
 	// Init result containers
@@ -666,6 +669,10 @@ void BundleICP(vector<PointXYZ>& points,
 	//	cout << dH << endl;
 	//}
 
+
+
+
+
 }
 
 
@@ -866,16 +873,16 @@ void PointToMapICPDebug(vector<PointXYZ>& tgt_pts,
 		// Align targets taking motion distortion into account
 		if (params.motion_distortion)
 		{
-			throw std::invalid_argument("motion_distortion not handled yet");
-			// size_t i_inds = 0;
-			// for (auto& ind : sub_inds){
-			// 	float t = float(ind) / tgt_pts.size();
-			// 	Eigen::Matrix4d H_rect = pose_interpolation.pose_interp(t, last_H, results.transform, 0);		
-			// 	Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
-			// 	Eigen::Matrix3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
-			// 	aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;
-			// 	i_inds++;
-			// }
+			size_t iphi = 0;
+			for (auto& phi : phis)
+			{
+				float t = (phi - params.init_phi) / (phi1 - params.init_phi);
+				Eigen::Matrix4d phi_H = pose_interp(t, params.init_transform, results.transform, 0);
+				Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
+				Eigen::Vector3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
+				aligned_mat.col(iphi) = (phi_R * targets_mat.col(iphi)) + phi_T;
+				iphi++;
+			}
 		}
 		else
 		{
@@ -1019,30 +1026,30 @@ void PointToMapICPDebug(vector<PointXYZ>& tgt_pts,
 	//	cout << endl << "dH" << b << " = " << endl;
 	//	cout << dH << endl;
 	//}
+
+
+
+
+
 }
 
 
-void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
+void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 	vector<float>& tgt_w,
 	PointMap& map,
 	ICP_params& params,
-	ICP_results& results, Eigen::Matrix4d const& last_H, int N_total)
+	ICP_results& results)
 {
 	// Parameters
 	// **********
-
 	size_t N = tgt_pts.size();
 	float max_pair_d2 = params.max_pairing_dist * params.max_pairing_dist;
 	float max_planar_d = params.max_planar_dist;
 	size_t first_steps = params.avg_steps / 2 + 1;
 
-	// setting motion distortion parameter as true(remove later)
-	params.motion_distortion = true;
-
 	// Get angles phi of each points for motion distorsion
 	// vector<float> phis;
 	// float phi1 = 0;
-		
 	// if (params.motion_distortion)
 	// {
 	// 	phis.reserve(tgt_pts.size());
@@ -1066,19 +1073,31 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 
 	// Aligned points (Deep copy of targets)
 	vector<PointXYZ> aligned(tgt_pts);
-	
+
 	// Matrix for original/aligned data (Shallow copy of parts of the points vector)
 	Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> targets_mat((float*)tgt_pts.data(), 3, N);
 	Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> aligned_mat((float*)aligned.data(), 3, N);
 
-	// debug Deep copies
-	vector<PointXYZ> aligned_dist(tgt_pts);
-	
 	// Apply initial transformation
-	Eigen::Matrix3f R_init = (params.init_transform.block(0, 0, 3, 3)).cast<float>();
-	Eigen::Vector3f T_init = (params.init_transform.block(0, 3, 3, 1)).cast<float>();
-	aligned_mat = (R_init * targets_mat).colwise() + T_init;
 	results.transform = params.init_transform;
+	if (params.motion_distortion)
+	{
+		size_t i_inds = 0;	
+		for (auto& t : tgt_t)	
+		{	
+			Eigen::Matrix4d H_rect = pose_interp(t, params.last_transform0, results.transform, 0);			
+			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();	
+			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();	
+			aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;	
+			i_inds++;	
+		}
+	}
+	else
+	{
+		Eigen::Matrix3f R_tot = (results.transform.block(0, 0, 3, 3)).cast<float>();
+		Eigen::Vector3f T_tot = (results.transform.block(0, 3, 3, 1)).cast<float>();
+		aligned_mat = (R_tot * targets_mat).colwise() + T_tot;
+	}
 
 	// Random generator
 	default_random_engine generator;
@@ -1103,17 +1122,18 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 	clock_str.push_back("Optimization .... ");
 	clock_str.push_back("Regularization .. ");
 	clock_str.push_back("Result .......... ");
-	
+
 	// // Debug (save map.cloud.pts)
-	string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/";
-	char buffer[100];
-	char buffer_check[100];
-	sprintf(buffer, "map_before_ICP_%03d.ply", int(count_iter));
-	sprintf(buffer_check, "aligned_before_ICP_%03d.ply", int(count_iter));
-	string filepath = path + string(buffer);
-	string filepath_check = path + string(buffer_check);
-	save_cloud(filepath, map.cloud.pts);
-	save_cloud(filepath_check, aligned);
+	// string path = "/home/administrator/catkin_ws/src/point_slam/src/test_maps/test_ply/";
+	// string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/"; 
+	// char buffer[100];
+	// char buffer_check[100];
+	// sprintf(buffer, "map_before_ICP_%03d.ply", int(count_iter));
+	// sprintf(buffer_check, "aligned_before_ICP_%03d.ply", int(count_iter));
+	// string filepath = path + string(buffer);
+	// string filepath_check = path + string(buffer_check);
+	// save_cloud(filepath, map.cloud.pts);
+	// save_cloud(filepath_check, aligned, tgt_t);
 
 	for (size_t step = 0; step < max_it; step++)
 	{
@@ -1224,32 +1244,16 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 		// aligned_dist = aligned;
 		// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> aligned_mat_dist((float*)aligned_dist.data(), 3, N);
 		if (params.motion_distortion)
-		{	
-			size_t iphi = 0;
-			for (auto& phi : phis)
-			{
-				float t = (phi - params.init_phi) / (phi1 - params.init_phi);
-				Eigen::Matrix4d phi_H = pose_interp(t, last_H, results.transform, 0);
-				Eigen::Matrix3f phi_R = (phi_H.block(0, 0, 3, 3)).cast<float>();
-				Eigen::Vector3f phi_T = (phi_H.block(0, 3, 3, 1)).cast<float>();
-				aligned_mat.col(iphi) = (phi_R * targets_mat.col(iphi)) + phi_T;
-				iphi++;
+		{
+			size_t i_inds = 0;	
+			for (auto& t : tgt_t)	
+			{	
+				Eigen::Matrix4d H_rect = pose_interp(t, params.last_transform0, results.transform, 0);			
+				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();	
+				Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();	
+				aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;	
+				i_inds++;	
 			}
-			// size_t i_inds = 0;
-			// for (auto& ind : sub_inds){
-			// 	float t = float(ind) / float(N_total);
-			// 	Eigen::Matrix4d H_rect = pose_interp(t, last_H, results.transform, 0);		
-			// 	Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
-			// 	Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
-			// 	aligned_mat.col(i_inds) = (R_rect * targets_mat.col(i_inds)) + T_rect;
-			// 	i_inds++;
-			// }
-
-			// debug distorted
-			// Eigen::Matrix3f R_tot = (results.transform.block(0, 0, 3, 3)).cast<float>();
-			// Eigen::Vector3f T_tot = (results.transform.block(0, 3, 3, 1)).cast<float>();
-			// aligned_mat_dist = (R_tot * targets_mat).colwise() + T_tot;
-
 		}
 		else
 		{
@@ -1260,7 +1264,7 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 
 		t[5] = std::clock();
 
-		
+
 		// Update all result matrices
 		if (step == 0)
 			results.all_transforms = Eigen::MatrixXd(results.transform);
@@ -1271,7 +1275,7 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 			temp.bottomRows(4) = Eigen::MatrixXd(results.transform);
 			results.all_transforms = temp;
 		}
-		// std::cout << "all " << results.all_transforms.block(0, 0, results.all_transforms.rows(), 4) << endl;
+
 		t[5] = std::clock();
 
 		///////////////////////
@@ -1328,12 +1332,8 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 			results.all_transforms.block(results.all_transforms.rows() - 4, 0, 4, 4) = mH;
 		}
 
-		// if (params.motion_distortion){
-		// 	last_H = results.transform;
-		// }
-		
+
 		///////////// DEBUG /////////////
-		
 
 		//cout << "***********************" << endl;
 		//for (size_t i = 0; i < t.size() - 1; i++)
@@ -1355,47 +1355,29 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 		//cout << "dT = " << endl << T << endl;
 		//cout << "dR = " << endl << T << endl;
 		
-		vector<float> sub_inds_debug;
-		for (auto& i : sub_inds){
-				sub_inds_debug.push_back(i);
-			}
-		if (step % 1 == 0)
-		{
-			string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/";
-			char buffer[100];
-			// char buffer_dist[100];
-			sprintf(buffer, "frame_undist_%03d_%03d.ply", (int)count_iter, int(step));
-			// sprintf(buffer_dist, "frame_dist_%03d_%03d.ply", (int)count_iter, int(step));
-			string filepath = path + string(buffer);
-			// string filepath_dist = path + string(buffer_dist);
-			save_anycloud(filepath, aligned, sub_inds_debug);
-			// save_anycloud(filepath_dist, aligned_dist, sub_inds_debug);
-		}
+		// if (step % 1 == 0)
+		// {
+		// 	// string path = "/home/administrator/catkin_ws/src/point_slam/src/test_maps/test_ply/";
+		// 	string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/";
+		// 	char buffer[100];
+		// 	// char buffer_dist[100];
+		// 	sprintf(buffer, "frame_icp_%03d_%03d.ply", (int)count_iter, int(step));
+		// 	// sprintf(buffer_dist, "frame_dist_%03d_%03d.ply", (int)count_iter, int(step));
+		// 	string filepath = path + string(buffer);
+		// 	// string filepath_dist = path + string(buffer_dist);
+		// 	save_cloud(filepath, aligned, tgt_t);
+		// }
+
+
+		//if (step % 3 == 0)
+		//{
+		//	char buffer[100];
+		//	sprintf(buffer, "cc_aligned_%03d.ply", (int)step * 0);
+		//	save_cloud(string(buffer), aligned, phis);
+		//}
 
 
 	}
-
-	// save pointcloud after the icp iterations
-		// for (int z = 0; z < tgt_pts.size(); z++){
-		// 	auto d = aligned[z][0] - aligned_dist[z][0] + aligned[z][1] - aligned_dist[z][1] + aligned[z][2] - aligned_dist[z][2];
-		// 	sad += d;
-		// 	cout << "sad " << sad << endl;
-		// }
-		// vector<float> sub_inds_debug;
-		// for (auto& i : sub_inds){
-		// 		sub_inds_debug.push_back(i);
-		// 	}
-		
-		// string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/";
-		// char buffer[100];
-		// char buffer_dist[100];
-		// sprintf(buffer, "cloud_undist_%03d.ply", (int)count_iter);
-		// sprintf(buffer_dist, "cloud_dist_%03d.ply", (int)count_iter);
-		// string filepath = path + string(buffer);
-		// string filepath_dist = path + string(buffer_dist);
-		// save_anycloud(filepath, aligned, sub_inds_debug);
-		// save_anycloud(filepath_dist, aligned_dist, sub_inds_debug);
-		
 
 
 	// Final regularisation for good measure
@@ -1433,8 +1415,7 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<size_t>& sub_inds,
 	//}
 
 	count_iter++;
-
-
+	
 
 }
 

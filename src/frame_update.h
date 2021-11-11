@@ -6,6 +6,8 @@
 #include <random>
 #include <unordered_set>
 #include <numeric>
+#include <chrono>
+#include <thread>
 
 #include "grid_subsampling/grid_subsampling.h"
 #include "polar_processing/polar_processing.h"
@@ -27,12 +29,14 @@
 
 using namespace std;
 
+
 // KDTree type definition
 typedef nanoflann::KDTreeSingleIndexAdaptor<nanoflann::L2_Simple_Adaptor<float, PointCloud>, PointCloud, 3> PointXYZ_KDTree;
 typedef Eigen::Matrix<double, 6, 6> Matrix6d;
 typedef Eigen::Matrix<double, 6, 1> Vector6d;
 
 void dummy_callback(const nav_msgs::OccupancyGrid::ConstPtr& msg);
+void dummy_callback_2(const sensor_msgs::PointCloud2::ConstPtr& msg);
 
 // Utilities
 // *********
@@ -44,11 +48,10 @@ Plane3D extract_ground(vector<PointXYZ>& points,
 					   int max_iter = 200,
 					   bool mode_2D = false);
 
+
 Eigen::Matrix4d transformListenerToEigenMatrix(const tf::TransformListener& listener, const string& target, const string& source, const ros::Time& stamp);
 Eigen::Matrix4d odomMsgToEigenMatrix(const nav_msgs::Odometry& odom);
 nav_msgs::Odometry eigenMatrixToOdomMsg(const Eigen::Matrix4d& inTr, const string& frame_id, const ros::Time& stamp);
-
-
 
 // SLAM params class
 // *****************
@@ -70,6 +73,11 @@ public:
 
 	// Account for motion distorsion (fasle in the case of simulated data)
 	bool motion_distortion;
+
+	// normal computation parameters
+	vector<float> polar_r2s;
+	float polar_r;
+
 
 	// Transformation matrix from velodyne frame to base frame
 	Eigen::Matrix4d H_velo_base;
@@ -104,7 +112,7 @@ public:
 		lidar_n_lines = 32;
 		map_voxel_size = 0.08;
 		frame_voxel_size = 0.16;
-		motion_distortion = true;
+		motion_distortion = false;
 		H_velo_base = Eigen::Matrix4d::Identity(4, 4);
 
 		h_scale = 0.5;
@@ -149,7 +157,6 @@ public:
 
 	// Current pose correction from odometry to map
 	Eigen::Matrix4d H_OdomToMap;
-
 
 	// Current number of aligned frames
 	int n_frames;
@@ -233,11 +240,6 @@ public:
 		file.pushField(num_poses, 4, npm::PLY_DOUBLE, {"rot_x", "rot_y", "rot_z", "rot_w"}, rots);
 		file.write();
 	}
-
-	// sad
-	float sad = 0;
-
-
 };
 
 // Main
