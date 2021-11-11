@@ -226,9 +226,6 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	//////////////////////
 	// Optional verbose //
 	//////////////////////
-	// set motion distortion (remove later)
-	params.motion_distortion = false;
-
 	params.verbose = 0;
 
 	vector<string> clock_str;
@@ -608,6 +605,10 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	////////////////////
 	// Update the map //
 	////////////////////
+	//debug deep copies
+	vector<PointXYZ> sub_pts_dist = sub_pts;
+	vector<PointXYZ> normals_dist = normals;
+	vector<PointXYZ> f_pts_dist = f_pts;
 
 	if (update_map)
 	{
@@ -626,6 +627,15 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 				norms_mat.col(i_inds) = (R_rect * norms_mat.col(i_inds));
 				i_inds++;
 			}
+
+			//debug 
+			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat_dist((float *)sub_pts_dist.data(), 3, sub_pts_dist.size());
+			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat_dist((float *)normals_dist.data(), 3, normals_dist.size());
+			Eigen::Matrix3f R_tot = (new_H_scannerToMap.block(0, 0, 3, 3)).cast<float>();
+			Eigen::Vector3f T_tot = (new_H_scannerToMap.block(0, 3, 3, 1)).cast<float>();
+			pts_mat_dist = (R_tot * pts_mat_dist).colwise() + T_tot;
+			norms_mat_dist = R_tot * norms_mat_dist;
+
 		}
 		else
 		{
@@ -668,6 +678,13 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 				center.y = T_rect.y();
 				center.z = T_rect.z();
 			}
+
+			//debug
+			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat_dist((float *)f_pts_dist.data(), 3, f_pts_dist.size());
+			Eigen::Matrix3f R_tot = (new_H_scannerToMap.block(0, 0, 3, 3)).cast<float>();
+			Eigen::Vector3f T_tot = (new_H_scannerToMap.block(0, 3, 3, 1)).cast<float>();
+			pts_mat_dist = (R_tot * pts_mat_dist).colwise() + T_tot;
+
 		}
 		else
 		{
@@ -700,13 +717,17 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		// string path = "/home/administrator/1-Deep-Collider/results/test_ptmap/";
 		string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/";
 		char buffer[200];
+		char buffer_dist[200];
 		sprintf(buffer, "debug_frame_%05d.ply", n_frames);
+		sprintf(buffer_dist, "debug_frame_dist_%05d.ply", n_frames);
 		string filepath = path + string(buffer);
+		string filepath_dist = path + string(buffer_dist);
 		vector<float> distances;
 		// ground_P.point_distances(f_pts, distances);
 		// save_cloud(filepath, f_pts, distances);
 		save_cloud(filepath, f_pts);
-
+		save_cloud(filepath_dist, f_pts_dist);
+		
 		map.debug_save_ply(path, n_frames);
 		map2D.debug_save_ply(path, n_frames);
 

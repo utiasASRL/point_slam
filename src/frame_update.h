@@ -112,7 +112,7 @@ public:
 		lidar_n_lines = 32;
 		map_voxel_size = 0.08;
 		frame_voxel_size = 0.16;
-		motion_distortion = true;
+		motion_distortion = false;
 		H_velo_base = Eigen::Matrix4d::Identity(4, 4);
 
 		h_scale = 0.5;

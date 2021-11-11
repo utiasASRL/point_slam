@@ -71,7 +71,7 @@ public:
 		rotDiffThresh = 0.1 * M_PI / 180.0;
 		transDiffThresh = 0.01;
 		init_phi = 0.0;
-		motion_distortion = false;
+		motion_distortion = true;
 		init_transform = Eigen::Matrix4d::Identity(4, 4);
 	}
 };
