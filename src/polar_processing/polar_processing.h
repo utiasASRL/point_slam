@@ -10,10 +10,10 @@
 
 #include <Eigen/Eigenvalues>
 
-#include "../../include/nanoflann/nanoflann.hpp"
 #include "../cloud/cloud.h"
 #include "../pointmap/pointmap.h"
-#include <set>
+
+#include "../../include/nanoflann/nanoflann.hpp"
 
 using namespace std;
 
@@ -78,11 +78,12 @@ void compare_map_to_frame(vector<PointXYZ>& frame_points,
 	vector<int>& movable_counts);
 
 
-void extract_lidar_frame_normals(vector<PointXYZ>& points,
-	vector<PointXYZ>& polar_pts,
-	vector<PointXYZ>& queries,
-	vector<PointXYZ>& polar_queries,
-	vector<PointXYZ>& normals,
-	vector<float>& norm_scores,
-	float polar_r);
+void extract_lidar_frame_normals(vector<PointXYZ> &points,
+								 vector<PointXYZ> &polar_pts,
+								 vector<PointXYZ> &queries,
+								 vector<PointXYZ> &polar_queries,
+								 vector<int> &polar_rings,
+								 vector<PointXYZ> &normals,
+								 vector<float> &norm_scores,
+								 vector<float> &polar_r2s);
 
