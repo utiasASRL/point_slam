@@ -150,23 +150,8 @@ void PointToPlaneErrorMinimizer(vector<PointXYZ>& targets,
 	vector<pair<size_t, size_t>>& sample_inds,
 	Eigen::Matrix4d&  mOut);
 
-void PointToMapICPDebug(vector<PointXYZ>& tgt_pts,
-	vector<float>& tgt_w,
-	vector<PointXYZ>& map_points,
-	vector<PointXYZ>& map_normals,
-	vector<float>& map_scores,
-	ICP_params& params,
-	ICP_results& results);
-
 void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 	vector<float>& tgt_w,
 	PointMap& map,
 	ICP_params& params,
 	ICP_results& results);
-
-void BundleICP(vector<PointXYZ>& points,
-	vector<PointXYZ>& normals,
-	vector<float>& weights,
-	vector<int>& lengths,
-	ICP_params& params,
-	BundleIcpResults& results);

@@ -78,6 +78,9 @@ public:
 	vector<float> polar_r2s;
 	float polar_r;
 
+	// Counting processed frames
+	int frame_i;
+
 
 	// Transformation matrix from velodyne frame to base frame
 	Eigen::Matrix4d H_velo_base;

@@ -226,7 +226,8 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	//////////////////////
 	// Optional verbose //
 	//////////////////////
-	params.verbose = 0;
+
+	// params.verbose = 1;
 
 	vector<string> clock_str;
 	vector<clock_t> t;
@@ -560,22 +561,47 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// Create result containers
 	ICP_results icp_results;
 
-	// If no map is available, use identity as the first pose
+	if (n_frames < 1)
+	{
+		// In all cases if it is the first frame init the last_transform0
+		params.icp_params.last_transform0 = H_scannerToMap_init;
+	}
 	if (map.size() < 1)
 	{
-		// icp_results.transform = H_scannerToMap_init;
+		// Case where we do not have a map yet. Override the first cloud position so that ground is at z=0
 		icp_results.transform = Eigen::Matrix4d::Identity();
 		icp_results.transform(2, 3) = 0.7;
-	
-		// initialize last transformation
 		params.icp_params.last_transform0 = icp_results.transform;
-		params.icp_params.last_transform1 = icp_results.transform;
-		params.icp_params.last_time = t_min;
 	}
 	else
 	{
-		params.icp_params.init_transform = params.icp_params.last_transform1;
-		PointToMapICP(sub_pts, sub_alphas, icp_scores, map, params.icp_params, icp_results);
+		if (n_frames < 1)
+		{
+
+			// TODO: Here we need to handle initial alignment case
+
+			// Case where we have a map, and the first frame needs to be aligned
+			// We assume robot is still in the beginning so no motion distortion
+			params.icp_params.init_transform = H_scannerToMap_init;
+			params.icp_params.motion_distortion = false;
+			PointToMapICP(sub_pts, sub_alphas, icp_scores, map, params.icp_params, icp_results);
+			params.icp_params.motion_distortion = params.motion_distortion;
+
+			// We override last_transform0 too to neglate motion distorsion for this first frame
+			params.icp_params.last_transform0 = icp_results.transform;
+		}
+		else
+		{
+			params.icp_params.init_transform = H_scannerToMap_init;
+			PointToMapICP(sub_pts, sub_alphas, icp_scores, map, params.icp_params, icp_results);
+		}
+
+		// Safe Check
+		if (icp_results.all_plane_rms.size() > 3 * params.icp_params.avg_steps)
+			ROS_WARN_STREAM("WARNING: ICP num_iter = " << icp_results.all_plane_rms.size());
+
+		if (icp_results.all_plane_rms.size() > 0.9 * params.icp_params.max_iter)
+			ROS_ERROR_STREAM("ERROR: ICP num_iter = " << icp_results.all_plane_rms.size());
 	}
 
 	t.push_back(std::clock());
@@ -605,10 +631,11 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	////////////////////
 	// Update the map //
 	////////////////////
-	//debug deep copies
-	vector<PointXYZ> sub_pts_dist = sub_pts;
-	vector<PointXYZ> normals_dist = normals;
-	vector<PointXYZ> f_pts_dist = f_pts;
+
+	// //debug deep copies
+	// vector<PointXYZ> sub_pts_dist = sub_pts;
+	// vector<PointXYZ> normals_dist = normals;
+	// vector<PointXYZ> f_pts_dist = f_pts;
 
 	if (update_map)
 	{
@@ -628,13 +655,13 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 				i_inds++;
 			}
 
-			//debug 
-			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat_dist((float *)sub_pts_dist.data(), 3, sub_pts_dist.size());
-			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat_dist((float *)normals_dist.data(), 3, normals_dist.size());
-			Eigen::Matrix3f R_tot = (new_H_scannerToMap.block(0, 0, 3, 3)).cast<float>();
-			Eigen::Vector3f T_tot = (new_H_scannerToMap.block(0, 3, 3, 1)).cast<float>();
-			pts_mat_dist = (R_tot * pts_mat_dist).colwise() + T_tot;
-			norms_mat_dist = R_tot * norms_mat_dist;
+			// //debug 
+			// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat_dist((float *)sub_pts_dist.data(), 3, sub_pts_dist.size());
+			// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat_dist((float *)normals_dist.data(), 3, normals_dist.size());
+			// Eigen::Matrix3f R_tot = (new_H_scannerToMap.block(0, 0, 3, 3)).cast<float>();
+			// Eigen::Vector3f T_tot = (new_H_scannerToMap.block(0, 3, 3, 1)).cast<float>();
+			// pts_mat_dist = (R_tot * pts_mat_dist).colwise() + T_tot;
+			// norms_mat_dist = R_tot * norms_mat_dist;
 
 		}
 		else
@@ -660,14 +687,25 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 	// Update the 2D map
 	PointXYZ center;
+	vector<PointXYZ> f_2Dpts;
+
 	if (update_map)
 	{
+		// Only use some rings not all
+		f_2Dpts.reserve(f_pts.size());
+		int i_2D = 0;
+		for (auto& ring : f_rings)
+		{
+			if (ring == 18 || ring == 15 || ring == 12)
+				f_2Dpts.push_back(f_pts[i_2D]);
+			i_2D++;
+		}
+
 		if (params.motion_distortion)
 		{
-			// TODO: Here do not use the whole f_pts cloud
-			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat_f((float *)f_pts.data(), 3, f_pts.size());
+			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat_f((float *)f_2Dpts.data(), 3, f_2Dpts.size());
 			float inv_factor = 1 / (t_max - t0);
-			for (int i = 0; i < f_pts.size(); i++)
+			for (int i = 0; i < f_2Dpts.size(); i++)
 			{
 				float alpha = (f_ts[i] - t0) * inv_factor;
 				Eigen::Matrix4d H_rect = pose_interp(alpha, params.icp_params.last_transform0, icp_results.transform, 0);	
@@ -678,17 +716,10 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 				center.y = T_rect.y();
 				center.z = T_rect.z();
 			}
-
-			//debug
-			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat_dist((float *)f_pts_dist.data(), 3, f_pts_dist.size());
-			Eigen::Matrix3f R_tot = (new_H_scannerToMap.block(0, 0, 3, 3)).cast<float>();
-			Eigen::Vector3f T_tot = (new_H_scannerToMap.block(0, 3, 3, 1)).cast<float>();
-			pts_mat_dist = (R_tot * pts_mat_dist).colwise() + T_tot;
-
 		}
 		else
 		{
-			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)f_pts.data(), 3, f_pts.size());
+			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)f_2Dpts.data(), 3, f_2Dpts.size());
 			Eigen::Matrix3f R_tot = (icp_results.transform.block(0, 0, 3, 3)).cast<float>();
 			Eigen::Vector3f T_tot = (icp_results.transform.block(0, 3, 3, 1)).cast<float>();
 			pts_mat = (R_tot * pts_mat).colwise() + T_tot;
@@ -707,34 +738,34 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		Plane3D ground_P = extract_ground(sub_pts, normals);
 
 		// Update 2D map
-		map2D.update_from_3D(f_pts, center, ground_P, params.map2d_zMin, params.map2d_zMax);
+		map2D.update_from_3D(f_2Dpts, center, ground_P, params.map2d_zMin, params.map2d_zMax);
 	}
 
-	// DEBUG ////////////////////////////
+	// // DEBUG ////////////////////////////
 
-	if (map2D.size() > 0 && n_frames % 1 == 0)
-	{
-		// string path = "/home/administrator/1-Deep-Collider/results/test_ptmap/";
-		string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/";
-		char buffer[200];
-		char buffer_dist[200];
-		sprintf(buffer, "debug_frame_%05d.ply", n_frames);
-		sprintf(buffer_dist, "debug_frame_dist_%05d.ply", n_frames);
-		string filepath = path + string(buffer);
-		string filepath_dist = path + string(buffer_dist);
-		vector<float> distances;
-		// ground_P.point_distances(f_pts, distances);
-		// save_cloud(filepath, f_pts, distances);
-		save_cloud(filepath, f_pts);
-		save_cloud(filepath_dist, f_pts_dist);
+	// if (map2D.size() > 0 && n_frames % 1 == 0)
+	// {
+	// 	// string path = "/home/administrator/1-Deep-Collider/results/test_ptmap/";
+	// 	string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/";
+	// 	char buffer[200];
+	// 	char buffer_dist[200];
+	// 	sprintf(buffer, "debug_frame_%05d.ply", n_frames);
+	// 	sprintf(buffer_dist, "debug_frame_dist_%05d.ply", n_frames);
+	// 	string filepath = path + string(buffer);
+	// 	string filepath_dist = path + string(buffer_dist);
+	// 	vector<float> distances;
+	// 	// ground_P.point_distances(f_pts, distances);
+	// 	// save_cloud(filepath, f_pts, distances);
+	// 	save_cloud(filepath, f_pts);
+	// 	save_cloud(filepath_dist, f_pts_dist);
 		
-		map.debug_save_ply(path, n_frames);
-		map2D.debug_save_ply(path, n_frames);
+	// 	map.debug_save_ply(path, n_frames);
+	// 	map2D.debug_save_ply(path, n_frames);
 
-		// ROS_WARN_STREAM(">>>>>>>>>>>>> " << n_frames << ": " << ground_P.u << " " << ground_P.d);
-	}
+	// 	// ROS_WARN_STREAM(">>>>>>>>>>>>> " << n_frames << ": " << ground_P.u << " " << ground_P.d);
+	// }
 
-	/////////////////////////////////////
+	// /////////////////////////////////////
 
 	t.push_back(std::clock());
 
@@ -756,11 +787,6 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// Update the last pose for future frames
 	last_H = icp_results.transform;
 
-	if (update_map)
-	{
-		// Update number of frames
-		n_frames++;
-	}
 
 	// Save all poses
 	if (stamp > latest_stamp)
@@ -768,6 +794,8 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		all_H.push_back(icp_results.transform);
 		f_times.push_back(stamp);
 		latest_stamp = stamp;
+		if (update_map)
+			n_frames++;
 	}
 
 	////////////////////////
@@ -775,7 +803,8 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	////////////////////////
 
 	double duration = 1000 * (t[t.size() - 1] - t[0]) / (double)CLOCKS_PER_SEC;
-	ROS_WARN_STREAM("Processed Frame " << msg->header.frame_id << " with stamp " << stamp << " in " <<  duration << " ms");
+	
+	cout << "[point_slam]: Processed Frame " << msg->header.frame_id << " with stamp " << stamp << " in " <<  duration << " ms" << endl;
 
 	if (params.verbose)
 	{
@@ -956,6 +985,9 @@ int main(int argc, char **argv)
 		ROS_WARN("Warning: Cannot read gt_classify");
 	}
 
+	// Update motion distorsion in ICP params
+	slam_params.icp_params.motion_distortion = slam_params.motion_distortion;
+
 	// Get log path
 	string user_name = "administrator";
 	if (const char *user = getenv("USER"))
@@ -965,13 +997,11 @@ int main(int argc, char **argv)
 	string start_time;
 	if (!nh.getParam("start_time", start_time))
 	{
-		// slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/tmp/";
-		slam_params.log_path = "/home/" + user_name + "/catkin_ws/src/point_slam_2/src/test_maps/logs/";
+		slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/tmp/";
 	}
 	else
 	{
-		// slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/";
-		slam_params.log_path = "/home/" + user_name + "/catkin_ws/src/point_slam_2/src/test_maps/logs/";
+		slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/";
 		slam_params.log_path += start_time + "/logs-" + start_time + "/";
 	}
 
