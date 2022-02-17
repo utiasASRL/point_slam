@@ -27,6 +27,10 @@
 #include "tf_conversions/tf_eigen.h"
 #include "eigen_conversions/eigen_msg.h"
 
+// #include <costmap_converter_msgs/msg/obstacle_msg.h>
+#include <costmap_converter/ObstacleArrayMsg.h>
+#include <vox_msgs/VoxGrid.h>
+
 using namespace std;
 
 
@@ -37,17 +41,12 @@ typedef Eigen::Matrix<double, 6, 1> Vector6d;
 
 void dummy_callback(const nav_msgs::OccupancyGrid::ConstPtr& msg);
 void dummy_callback_2(const sensor_msgs::PointCloud2::ConstPtr& msg);
+void dummy_callback_3(const vox_msgs::VoxGrid::ConstPtr& msg);
+void dummy_callback_4(const costmap_converter::ObstacleArrayMsg::ConstPtr& msg);
+
 
 // Utilities
 // *********
-
-Plane3D extract_ground(vector<PointXYZ>& points,
-					   vector<PointXYZ>& normals,
-					   float angle_vertical_thresh = M_PI / 6,
-					   float dist_thresh = 0.1,
-					   int max_iter = 200,
-					   bool mode_2D = false);
-
 
 Eigen::Matrix4d transformListenerToEigenMatrix(const tf::TransformListener& listener, const string& target, const string& source, const ros::Time& stamp);
 Eigen::Matrix4d odomMsgToEigenMatrix(const nav_msgs::Odometry& odom);
@@ -71,15 +70,23 @@ public:
 	// Size of the voxels for frame subsampling
 	float frame_voxel_size;
 
-	// Account for motion distorsion (fasle in the case of simulated data)
+	// max distance travelled before frames are removed from local map
+	float local_map_dist;
+
+	// Account for motion distortion (fasle in the case of simulated data)
 	bool motion_distortion;
 
 	// normal computation parameters
 	vector<float> polar_r2s;
 	float polar_r;
+	float min_theta_radius;
+	float theta_radius_ratio;
 
 	// Counting processed frames
 	int frame_i;
+
+	// Number of threads used
+	int n_threads;
 
 
 	// Transformation matrix from velodyne frame to base frame
@@ -113,15 +120,20 @@ public:
 	SLAM_params() : loc_labels(7)
 	{
 		lidar_n_lines = 32;
+		min_theta_radius = 0.025;
+		theta_radius_ratio = 1.5;
 		map_voxel_size = 0.08;
 		frame_voxel_size = 0.16;
+		local_map_dist = 10.0;
 		motion_distortion = false;
 		H_velo_base = Eigen::Matrix4d::Identity(4, 4);
 
-		h_scale = 0.5;
-		r_scale = 4.0;
+		h_scale = 0.3;
+		r_scale = 10.0;
 		outl_rjct_passes = 2;
 		outl_rjct_thresh = 0.003;
+
+		n_threads = 1;
 
 		odom_frame = "odom";
 		map_frame = "map";
@@ -163,6 +175,7 @@ public:
 
 	// Current number of aligned frames
 	int n_frames;
+	float t_min, t_max;
 
 	// ROS parameters
 	ros::Time latest_stamp;
@@ -196,17 +209,17 @@ public:
 		// Optionally init map2D from map3D
 		if (init_points.size() > 0)
 		{
-			Plane3D ground_P = extract_ground(init_points, init_normals);
+			Plane3D ground_P = frame_ground_ransac(init_points, init_normals, 20.0, 0.1);
 			map2D.init_from_3D_map(init_points, ground_P, slam_params0.map2d_zMin, slam_params0.map2d_zMax);
 		}
 	}
 
 	// Mapping methods
 	void init_map() { return; }
-	void gotCloud(const sensor_msgs::PointCloud2::ConstPtr& msg);
-	void gotLocCloud(const sensor_msgs::PointCloud2::ConstPtr& msg);
-	void processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map = true);
-	void add_new_frame(vector<PointXYZ>& f_pts, Eigen::Matrix4d& init_H, int verbose = 0);
+	void gotClassifCloud(const sensor_msgs::PointCloud2::ConstPtr& msg);
+	void gotVeloCloud(const sensor_msgs::PointCloud2::ConstPtr& msg);
+	void processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map_2D = true);
+	void processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map_2D = true);
 	void publish_2D_map();
 
 	// Debug method
@@ -244,6 +257,22 @@ public:
 		file.write();
 	}
 };
+
+// Function declaration
+// ********************
+
+void preprocess_frame(vector<PointXYZ> &f_pts,
+					  vector<float> &f_ts,
+					  vector<ushort> &f_rings,
+					  vector<PointXYZ> &sub_pts,
+					  vector<PointXYZ> &normals,
+					  vector<float> &norm_scores,
+					  vector<double> &icp_scores,
+					  vector<size_t> &sub_inds,
+					  Plane3D &frame_ground,
+					  vector<float> &heights,
+					  SLAM_params &params,
+					  vector<clock_t> &t);
 
 // Main
 // ****

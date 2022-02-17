@@ -16,29 +16,31 @@
     <param name="filter" value="$(arg filter)"/>
     <param name="gt_classify" value="$(arg gt_classify)"/>
 
-    <param name="map_voxel_size" value="0.05"/>         <!-- Originally 0.03 -->
-    <param name="frame_voxel_size" value="0.15"/>       <!-- Originally 0.10 -->
-    <param name="map2d_pixel_size" value="0.05"/>
+
+    <param name="n_threads" value="8"/>
+
+    <param name="map_voxel_size" value="0.06"/>         <!-- Originally 0.03 -->
+    <param name="frame_voxel_size" value="0.12"/>       <!-- Originally 0.10 -->
+    <param name="map2d_pixel_size" value="0.06"/>
     <param name="map2d_max_count" value="50"/>
-    <param name="map2d_z_min" value="0.2"/>
+    <param name="map2d_z_min" value="0.08"/>
     <param name="map2d_z_max" value="1.2"/>
     <param name="motion_distortion" value="true"/>
     <param name="lidar_n_lines" value="32"/>
 
-    <!-- <param name="init_map_day" value="2020-10-02-13-39-05"/> -->
-    <!-- <param name="init_map_ind" value="2"/> -->
-
-    <!-- <param name="init_map_path" value="2020-10-02-13-39-05"/>  New parameter to provide the path to the map ply file -->
-
+    <!-- New parameter to provide the path to the map ply file -->
+    <!-- <param name="init_map_path" value=""/> -->
+    <param name="init_map_path" value="/home/administrator/1-Deep-Collider/results/runs/Myhal/map_update_0001.ply"/>
+    
     <param name="h_scale" value="0.5"/>
     <param name="r_scale" value="4.0"/>
     <param name="outl_rjct_passes" value="2"/>
     <param name="outl_rjct_thresh" value="0.003"/>
 
-    <param name="icp_samples" value="600"/>           <!-- Originally 600 -->
-    <param name="icp_pairing_dist" value="2"/>
-    <param name="icp_planar_dist" value="0.3"/>
-    <param name="icp_avg_steps" value="4"/>           <!-- Originally 5 -->
+    <param name="icp_samples" value="500"/>           <!-- Originally 600 -->
+    <param name="icp_pairing_dist" value="2.0"/>
+    <param name="icp_planar_dist" value="0.12"/>      <!-- Originally 0.12 -->
+    <param name="icp_avg_steps" value="1"/>           <!-- Originally 5 -->
     <param name="icp_max_iter" value="50"/>           <!-- Originally 100 -->
 
   </node>

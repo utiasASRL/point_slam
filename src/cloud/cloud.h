@@ -29,6 +29,8 @@
 #include <cmath>
 #include <stdio.h>
 #include <string.h>
+#include <chrono>
+#include <random>
 
 
 #include <time.h>
@@ -36,6 +38,9 @@
 #include "../npm_ply/ply_types.h"
 #include "../npm_ply/ply_file_in.h"
 #include "../npm_ply/ply_file_out.h"
+
+#include <Eigen/Eigenvalues>
+
 
 //------------------------------------------------------------------------------------------------------------
 // Point class
@@ -61,11 +66,17 @@ public:
 	PointXYZ(float x0, float y0, float z0) { x = x0; y = y0; z = z0; }
 	
 	// array type accessor
-	float operator [] (int i) const
+	float& operator[](std::size_t idx)       
 	{
-		if (i == 0) return x;
-		else if (i == 1) return y;
-		else return z;
+		if (idx == 2) return z;
+		else if (idx == 1) return y;
+		else  return x;
+	}
+    const float& operator[](std::size_t idx) const
+	{
+		if (idx == 2) return z;
+		else if (idx == 1) return y;
+		else return x;
 	}
 
 	// opperations
@@ -389,6 +400,28 @@ public:
 		return tmp * tmp / u.sq_norm();
 	}
 
+	// Method for reversing the normal of the Plane
+	void reverse()
+	{
+		u *= -1;
+		d *= -1;
+	}
+
+
+	// Method getting distances to some points
+	void point_distances_signed(std::vector<PointXYZ>& points, std::vector<float>& distances)
+	{
+		if (distances.size() != points.size())
+			distances = std::vector<float>(points.size());
+		size_t i = 0;
+		float inv_norm_u = 1 / std::sqrt(u.sq_norm());
+		for (auto& p : points)
+		{
+			distances[i] = (u.dot(p) - d) * inv_norm_u;
+			i++;
+		}
+	}
+
 	// Method getting distances to some points
 	void point_distances(std::vector<PointXYZ>& points, std::vector<float>& distances)
 	{
@@ -415,3 +448,196 @@ public:
 		return count;
 	}
 };
+
+
+//-------------------------------------------------------------------------------------------
+//
+// VoxKey
+// ******
+//
+//	Here we define a struct that will be used as key in our hash map. It contains 3 integers.
+//  Then we specialize the std::hash function for this class.
+//
+//-------------------------------------------------------------------------------------------
+
+class VoxKey
+{
+public:
+	int x;
+	int y;
+	int z;
+
+	VoxKey()
+	{
+		x = 0;
+		y = 0;
+		z = 0;
+	}
+	VoxKey(int x0, int y0, int z0)
+	{
+		x = x0;
+		y = y0;
+		z = z0;
+	}
+
+	bool operator==(const VoxKey &other) const
+	{
+		return (x == other.x && y == other.y && z == other.z);
+	}
+
+	int& operator[](std::size_t idx)       
+	{
+		if (idx == 2) return z;
+		else if (idx == 1) return y;
+		else  return x;
+	}
+    const int& operator[](std::size_t idx) const
+	{
+		if (idx == 2) return z;
+		else if (idx == 1) return y;
+		else return x;
+	}
+
+	void update_min(const VoxKey &k0)
+	{
+		if (k0.x < x)
+			x = k0.x;
+		if (k0.y < y)
+			y = k0.y;
+		if (k0.z < z)
+			z = k0.z;
+	}
+
+	void update_max(const VoxKey &k0)
+	{
+		if (k0.x > x)
+			x = k0.x;
+		if (k0.y > y)
+			y = k0.y;
+		if (k0.z > z)
+			z = k0.z;
+	}
+};
+
+inline VoxKey operator+(const VoxKey A, const VoxKey B)
+{
+	return VoxKey(A.x + B.x, A.y + B.y, A.z + B.z);
+}
+
+inline bool operator<(const VoxKey A, const VoxKey B)
+{
+	if (A.x == B.x)
+	{
+		if (A.y == B.y)
+			return (A.z < B.z);
+		else
+			return (A.y < B.y);
+	}
+	else
+		return (A.x < B.x);
+}
+
+inline VoxKey operator-(const VoxKey A, const VoxKey B)
+{
+	return VoxKey(A.x - B.x, A.y - B.y, A.z - B.z);
+}
+
+// Simple utility function to combine hashtables
+template <typename T, typename... Rest>
+void hash_combine(std::size_t &seed, const T &v, const Rest &...rest)
+{
+	seed ^= std::hash<T>{}(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+	(hash_combine(seed, rest), ...);
+}
+
+// Specialization of std:hash function
+namespace std
+{
+	template <>
+	struct hash<VoxKey>
+	{
+		std::size_t operator()(const VoxKey &k) const
+		{
+			std::size_t ret = 0;
+			hash_combine(ret, k.x, k.y, k.z);
+			return ret;
+		}
+	};
+}
+
+
+//-------------------------------------------------------------------------------------------
+//
+// PixKey
+// ******
+//
+//	Same as VoxKey but in 2D
+//
+//-------------------------------------------------------------------------------------------
+
+class PixKey
+{
+public:
+	int x;
+	int y;
+
+	PixKey()
+	{
+		x = 0;
+		y = 0;
+	}
+	PixKey(int x0, int y0)
+	{
+		x = x0;
+		y = y0;
+	}
+
+	bool operator==(const PixKey &other) const
+	{
+		return (x == other.x && y == other.y);
+	}
+};
+
+inline PixKey operator+(const PixKey A, const PixKey B)
+{
+	return PixKey(A.x + B.x, A.y + B.y);
+}
+
+inline PixKey operator-(const PixKey A, const PixKey B)
+{
+	return PixKey(A.x - B.x, A.y - B.y);
+}
+
+// Specialization of std:hash function
+namespace std
+{
+	template <>
+	struct hash<PixKey>
+	{
+		std::size_t operator()(const PixKey &k) const
+		{
+			std::size_t ret = 0;
+			hash_combine(ret, k.x, k.y);
+			return ret;
+		}
+	};
+} // namespace std
+
+
+void random_3_pick(int &A_i, int &B_i, int &C_i,
+				   std::uniform_int_distribution<int> &distribution,
+				   std::default_random_engine &generator);
+
+bool is_triplet_bad(PointXYZ &A, PointXYZ &B, PointXYZ &C, PointXYZ &u);
+
+Plane3D plane_ransac(std::vector<PointXYZ> &points,
+					 float max_dist = 0.1,
+					 int max_steps = 100);
+					 
+Plane3D frame_ground_ransac(std::vector<PointXYZ> &points,
+							std::vector<PointXYZ> &normals,
+							float vertical_thresh_deg = 20.0,
+							float max_dist = 0.1);
+
+bool rot_u_to_v(PointXYZ u, PointXYZ v, Eigen::Matrix3d &R);
+

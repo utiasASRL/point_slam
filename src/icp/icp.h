@@ -6,6 +6,7 @@
 #include <random>
 #include <unordered_set>
 #include <numeric>
+#include <chrono>
 
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -54,8 +55,11 @@ public:
 	Eigen::Matrix4d init_transform;
 	Eigen::Matrix4d last_transform0;
 	Eigen::Matrix4d last_transform1;
-	double last_stamp;
 	float last_time;
+
+	// Variables related to flat ground
+	double ground_z;
+	double ground_w;
 
 	// Methods
 	// *******
@@ -64,7 +68,7 @@ public:
 	ICP_params()
 	{
 		n_samples = 1000;
-		max_pairing_dist = 5.0;
+		max_pairing_dist = 1.0;
 		max_planar_dist = 0.3;
 		max_iter = 50;
 		avg_steps = 3;
@@ -73,6 +77,11 @@ public:
 		init_phi = 0.0;
 		motion_distortion = true;
 		init_transform = Eigen::Matrix4d::Identity(4, 4);
+		last_transform0 = Eigen::Matrix4d::Identity(4, 4);
+		last_transform1 = Eigen::Matrix4d::Identity(4, 4);
+		last_time = 0;
+		ground_z = 0;
+		ground_w = -1;
 	}
 };
 
@@ -85,7 +94,6 @@ public:
 	// ********
 
 	// Final transformation
-	Eigen::Matrix4d last_transform;
 	Eigen::Matrix4d transform;
 	Eigen::MatrixXd all_transforms;
 
@@ -99,7 +107,6 @@ public:
 	// Constructor
 	ICP_results()
 	{
-		last_transform = Eigen::Matrix4d::Identity(4, 4);
 		transform = Eigen::Matrix4d::Identity(4, 4);
 		all_transforms = Eigen::MatrixXd::Zero(4, 4);
 		all_rms = vector<float>();
@@ -138,9 +145,6 @@ public:
 // Function declaration
 // ********************
 
-
-Eigen::Matrix4d pose_interp(float t, Eigen::Matrix4d const& H1, Eigen::Matrix4d const& H2, int verbose);
-
 void SolvePoint2PlaneLinearSystem(const Matrix6d& A, const Vector6d& b, Vector6d& x);
 
 void PointToPlaneErrorMinimizer(vector<PointXYZ>& targets,
@@ -148,10 +152,12 @@ void PointToPlaneErrorMinimizer(vector<PointXYZ>& targets,
 	vector<PointXYZ>& refNormals,
 	vector<float>& weights,
 	vector<pair<size_t, size_t>>& sample_inds,
-	Eigen::Matrix4d&  mOut);
+	Eigen::Matrix4d&  mOut,
+	vector<bool> &is_ground,
+	double ground_z=0);
 
 void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
-	vector<float>& tgt_w,
+	vector<double>& tgt_w,
 	PointMap& map,
 	ICP_params& params,
 	ICP_results& results);

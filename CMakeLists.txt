@@ -16,7 +16,16 @@ find_package(catkin REQUIRED COMPONENTS
   tf_conversions 
   message_filters 
   eigen_conversions
+  vox_msgs
 )
+
+# let cmake find OpenMP and set some variables
+find_package(OpenMP REQUIRED)
+if(OPENMP_FOUND)
+  message(STATUS "OPENMP FOUND")
+  set(OpenMP_FLAGS ${OpenMP_CXX_FLAGS})  # or if you use C: ${OpenMP_C_FLAGS}
+  set(OpenMP_LIBS gomp)
+endif()
 
 
 
@@ -32,7 +41,8 @@ find_package(catkin REQUIRED COMPONENTS
 
 catkin_package(
   DEPENDS pcl_ros roscpp rospy std_msgs rosbag sensor_msgs pcl_conversions nav_msgs geometry_msgs 
-  move_base_msgs actionlib tf tf_conversions message_filters eigen_conversions
+  move_base_msgs actionlib tf tf_conversions message_filters eigen_conversions OpenMP
+  vox_msgs
 	INCLUDE_DIRS include
 )
 
@@ -61,7 +71,8 @@ add_library(grid_subsampling src/grid_subsampling/grid_subsampling.cpp)
 target_link_libraries(grid_subsampling cloud ${catkin_LIBRARIES})
 
 add_library(polar_processing src/polar_processing/polar_processing.cpp)
-target_link_libraries(polar_processing cloud ${catkin_LIBRARIES})
+target_compile_options(polar_processing PRIVATE ${OpenMP_FLAGS})
+target_link_libraries(polar_processing cloud ${catkin_LIBRARIES} ${OpenMP_LIBS})
 
 add_library(pointmap src/pointmap/pointmap.cpp)
 target_link_libraries(pointmap cloud ${catkin_LIBRARIES})
@@ -75,7 +86,8 @@ target_link_libraries(icp pointmap cloud ${catkin_LIBRARIES})
 ## The recommended prefix ensures that target names across packages don't collide
 
 add_executable(frame_update src/frame_update.cpp)
-target_link_libraries(frame_update icp pointmap polar_processing grid_subsampling cloud ${catkin_LIBRARIES})
+target_compile_options(frame_update PRIVATE ${OpenMP_FLAGS})
+target_link_libraries(frame_update icp pointmap polar_processing grid_subsampling cloud ${catkin_LIBRARIES} ${OpenMP_LIBS})
 
 
 #############

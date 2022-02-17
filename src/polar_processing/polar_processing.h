@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <ctime>
+#include <omp.h>
 
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -11,7 +12,6 @@
 #include <Eigen/Eigenvalues>
 
 #include "../cloud/cloud.h"
-#include "../pointmap/pointmap.h"
 
 #include "../../include/nanoflann/nanoflann.hpp"
 
@@ -19,64 +19,68 @@ using namespace std;
 
 
 // KDTree type definition
-typedef nanoflann::KDTreeSingleIndexAdaptor< nanoflann::L2_Simple_Adaptor<float, PointCloud>, PointCloud, 3> PointXYZ_KDTree;
+typedef nanoflann::KDTreeSingleIndexAdaptor<nanoflann::L2_Simple_Adaptor<float, PointCloud>, PointCloud, 3> PointXYZ_KDTree;
 
-void cart2pol_(vector<PointXYZ>& xyz);
-PointXYZ cart2pol(const PointXYZ& p);
+void cart2pol_(vector<PointXYZ> &xyz, int n_thread = 1);
 
-void pca_features(vector<PointXYZ>& points,
-	vector<float>& eigenvalues,
-	vector<PointXYZ>& eigenvectors);
+inline PointXYZ cart2pol(const PointXYZ p)
+{
+	float tmp1 = p.x * p.x + p.y * p.y;
+	float tmp2 = tmp1 + p.z * p.z;
+	return PointXYZ(sqrt(tmp2), atan2(sqrt(tmp1), p.z), atan2(p.y, p.x) + M_PI / 2);
+}
 
+void get_min_max_times(vector<float> &f_ts, float &t_min, float &t_max, float loop_ratio);
 
-void detect_outliers(vector<PointXYZ>& rtp,
-	vector<float>& scores,
-	int lidar_n_lines,
-	vector<float>& ring_angles,
-	float minTheta,
-	int n_pass,
-	float threshold);
+void pca_features(vector<PointXYZ> &points,
+				  vector<float> &eigenvalues,
+				  vector<PointXYZ> &eigenvectors);
 
+void detect_outliers(vector<PointXYZ> &rtp,
+					 vector<float> &scores,
+					 int lidar_n_lines,
+					 vector<float> &ring_angles,
+					 float minTheta,
+					 int n_pass,
+					 float threshold);
 
-float get_lidar_angle_res(vector<PointXYZ>& rtp, float& minTheta, float& maxTheta, int lidar_n_lines);
-void get_lidar_angles(vector<PointXYZ>& rtp, vector<float>& ring_angles, int lidar_n_lines);
+float get_lidar_angle_res(vector<PointXYZ> &rtp, float &minTheta, float &maxTheta, int lidar_n_lines);
 
+void get_lidar_angles(vector<PointXYZ> &rtp, vector<float> &ring_angles, int lidar_n_lines);
 
-void lidar_log_radius(vector<PointXYZ>& rtp, float polar_r, float r_scale);
+void lidar_log_radius(vector<PointXYZ> &rtp, float polar_r, float r_scale);
 
+void lidar_horizontal_scale(vector<PointXYZ> &rtp, float h_scale);
 
-void lidar_horizontal_scale(vector<PointXYZ>& rtp, float h_scale);
+void extract_features_multi_thread(vector<PointXYZ> &points,
+								   vector<PointXYZ> &normals,
+								   vector<float> &planarity,
+								   vector<float> &linearity,
+								   int lidar_n_lines,
+								   float h_scale,
+								   float r_scale,
+								   int verbose);
 
+void smart_normal_score(vector<PointXYZ> &points,
+						vector<PointXYZ> &polar_pts,
+						vector<PointXYZ> &normals,
+						vector<float> &scores);
 
-void extract_features_multi_thread(vector<PointXYZ>& points,
-	vector<PointXYZ>& normals,
-	vector<float>& planarity,
-	vector<float>& linearity,
-	int lidar_n_lines,
-	float h_scale,
-	float r_scale,
-	int verbose);
+void smart_icp_score(vector<PointXYZ> &polar_pts,
+					 vector<PointXYZ> &normals,
+					 vector<float> &heights,
+					 vector<double> &scores);
 
-void smart_normal_score(vector<PointXYZ>& points,
-	vector<PointXYZ>& polar_pts,
-	vector<PointXYZ>& normals,
-	vector<float>& scores);
-	
-void smart_icp_score(vector<PointXYZ>& polar_pts,
-					 vector<float>& scores);
-
-
-void compare_map_to_frame(vector<PointXYZ>& frame_points,
-	vector<PointXYZ>& map_points,
-	unordered_map<VoxKey, size_t>& map_samples,
-	Eigen::Matrix3d R_d,
-	Eigen::Vector3d T_d,
-	float theta_dl,
-	float phi_dl,
-	float map_dl,
-	vector<float>& movable_probs,
-	vector<int>& movable_counts);
-
+// void compare_map_to_frame(vector<PointXYZ> &frame_points,
+// 						  vector<PointXYZ> &map_points,
+// 						  unordered_map<VoxKey, size_t> &map_samples,
+// 						  Eigen::Matrix3d R_d,
+// 						  Eigen::Vector3d T_d,
+// 						  float theta_dl,
+// 						  float phi_dl,
+// 						  float map_dl,
+// 						  vector<float> &movable_probs,
+// 						  vector<int> &movable_counts);
 
 void extract_lidar_frame_normals(vector<PointXYZ> &points,
 								 vector<PointXYZ> &polar_pts,
@@ -85,5 +89,5 @@ void extract_lidar_frame_normals(vector<PointXYZ> &points,
 								 vector<int> &polar_rings,
 								 vector<PointXYZ> &normals,
 								 vector<float> &norm_scores,
-								 vector<float> &polar_r2s);
-
+								 vector<float> &polar_r2s,
+								 int n_threads = 1);

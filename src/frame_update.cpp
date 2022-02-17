@@ -16,87 +16,21 @@ void dummy_callback_2(const sensor_msgs::PointCloud2::ConstPtr& msg)
   ROS_INFO("I heard one pred cloud message");
 }
 
+void dummy_callback_3(const vox_msgs::VoxGrid::ConstPtr& msg)
+{
+  ROS_INFO("I heard one pred message");
+}
+
+void dummy_callback_4(const costmap_converter::ObstacleArrayMsg::ConstPtr& msg)
+{
+  ROS_INFO("I heard one obstacle message");
+}
+
 
 //-----------------------------------------------------------------------------------------------------------------------------
 // Utilities
 // *********
 
-Plane3D extract_ground(vector<PointXYZ>& points,
-					   vector<PointXYZ>& normals,
-					   float angle_vertical_thresh,
-					   float dist_thresh,
-					   int max_iter,
-					   bool mode_2D)
-{
-
-	// In case of 2D mode, take the minimum height and use vertical normal
-	if (mode_2D)
-	{
-		PointXYZ A = points[0];
-		for (auto& p : points)
-		{
-			if (p.z < A.z)
-				A = p;
-		}
-		return Plane3D(A, PointXYZ(0, 0, 1));
-	}
-
-	// Get the points with vertical normal (angle_vertical_thresh should be in radians)
-	vector<PointXYZ> valid_points;
-	valid_points.reserve(points.size());
-	size_t i = 0;
-	float cos_thresh = cos(angle_vertical_thresh);
-	for (auto& n : normals)
-	{
-		if (abs(n.z) > cos_thresh)
-		{
-			valid_points.push_back(points[i]);
-		}
-		i++;
-	}
-
-	// Random generator
-	default_random_engine generator;
-	uniform_int_distribution<size_t> distribution(0, valid_points.size() - 1);
-
-	// RANSAC loop
-	int best_votes = 0;
-	Plane3D best_P;
-	for (int i = 0; i < max_iter; i++)
-	{
-		// Draw 3 random points
-		unordered_set<size_t> unique_inds;
-		vector<PointXYZ> ABC;
-		while (unique_inds.size() < 3)
-		{
-			size_t ind = distribution(generator);
-			unique_inds.insert(ind);
-			if (unique_inds.size() > ABC.size())
-				ABC.push_back(valid_points[ind]);
-		}
-
-		// Get the corresponding plane
-		Plane3D candidate_P(ABC[0], ABC[1], ABC[2]);
-
-		// Avoid ill defined planes
-		if (candidate_P.u.sq_norm() < 1e-5)
-		{
-			i--;
-			continue;
-		}
-
-		// Get the number of votes for this plane
-		int votes = candidate_P.in_range(valid_points, dist_thresh);
-
-		// Save best plane
-		if (votes > best_votes)
-		{
-			best_votes = votes;
-			best_P = candidate_P;
-		}
-	}
-	return best_P;
-}
 
 Eigen::Matrix4d transformListenerToEigenMatrix(const tf::TransformListener& listener, const string& target, const string& source, const ros::Time& stamp)
 {
@@ -154,6 +88,12 @@ tf::Transform eigenMatrixToTransform(const Eigen::Matrix4d& in_H)
 
 void PointMapSLAM::publish_2D_map()
 {
+	float score_threshold = 0.6;
+	if (params.filtering)
+		score_threshold = 0.95;
+	score_threshold = 0.95;
+
+
 	// Init meta-data
 	nav_msgs::GetMap::Response map_message;
 	map_message.map.info.width = map2D.maxPix.x - map2D.minPix.x + 1;
@@ -175,7 +115,7 @@ void PointMapSLAM::publish_2D_map()
 	for (auto& pix : map2D.samples)
 	{
 		size_t mapIdx = (size_t)((pix.first.x - map2D.minPix.x) + map_message.map.info.width * (pix.first.y - map2D.minPix.y));
-		if (map2D.scores[pix.second] > 0.4)
+		if (map2D.scores[pix.second] > score_threshold)
 			map_message.map.data[mapIdx] = 100;
 	}
 
@@ -189,59 +129,224 @@ void PointMapSLAM::publish_2D_map()
 	sstm.publish(map_message.map.info);
 }
 
-//-----------------------------------------------------------------------------------------------------------------------------
-// SLAM function
-// *************
 
-void PointMapSLAM::gotLocCloud(const sensor_msgs::PointCloud2::ConstPtr& msg)
+//-----------------------------------------------------------------------------------------------------------------------------
+// SLAM functions
+// **************
+
+void preprocess_frame(vector<PointXYZ> &f_pts,
+					  vector<float> &f_ts,
+					  vector<ushort> &f_rings,
+					  vector<PointXYZ> &sub_pts,
+					  vector<PointXYZ> &normals,
+					  vector<float> &norm_scores,
+					  vector<double> &icp_scores,
+					  vector<size_t> &sub_inds,
+					  Plane3D &frame_ground,
+					  vector<float> &heights,
+					  SLAM_params &params,
+					  vector<double> &t)
 {
-	// ROS_WARN_STREAM("Processing Loc Cloud");
-	// Automatically in behavior 1: Using the prediction form the collider
-	// Here we process raw clouds (no prediction so we do not update the map and map2D)
-	processCloud(msg, false, false);
+
+	//////////////////////////////////////////
+	// Preprocess frame and compute normals //
+	//////////////////////////////////////////
+
+	// Parameters
+
+	// Create a copy of points in polar coordinates
+	vector<PointXYZ> polar_pts(f_pts);
+	cart2pol_(polar_pts, params.n_threads);
+	
+	t.push_back(omp_get_wtime());
+
+	// Get angle for each lidar point, and the corresponding polar_r2
+	if (params.polar_r2s.size() < 1)
+	{
+		vector<float> lidar_angles;
+		get_lidar_angles(polar_pts, lidar_angles, params.lidar_n_lines);
+
+		// Fill from last to first to respect ring order
+		int j = lidar_angles.size() - 1;
+		float tmp = params.theta_radius_ratio * (lidar_angles[j] - lidar_angles[j-1]);
+		params.polar_r2s.push_back(pow(max(tmp, params.min_theta_radius), 2));
+		j--;
+		while (j > 0)
+		{
+			tmp = params.theta_radius_ratio * min(lidar_angles[j+1] - lidar_angles[j], lidar_angles[j] - lidar_angles[j-1]);
+			params.polar_r2s.push_back(pow(max(tmp, params.min_theta_radius), 2));
+			j--;
+		}
+		tmp = params.theta_radius_ratio * (lidar_angles[j + 1] - lidar_angles[j]);
+		params.polar_r2s.push_back(pow(max(tmp, params.min_theta_radius), 2));
+
+
+		// Get lidar angle resolution
+		float minTheta, maxTheta;
+		float lidar_angle_res = get_lidar_angle_res(polar_pts, minTheta, maxTheta, params.lidar_n_lines);
+
+		// Define the polar neighbors radius in the scaled polar coordinates
+		params.polar_r = params.theta_radius_ratio * lidar_angle_res;
+
+	}
+
+	// cout << "angle_res = " << lidar_angle_res << endl;
+	// cout << "angles :" << endl;
+	// for (auto& angle : lidar_angles)
+	// {
+	// 	cout << angle << endl;
+	// }
+
+	// Apply log scale to radius coordinate (in place)
+	lidar_log_radius(polar_pts, params.polar_r, params.r_scale);
+
+	// Apply horizontal scaling (to have smaller neighborhoods in horizontal direction)
+	lidar_horizontal_scale(polar_pts, params.h_scale);
+	
+
+	// // Remove outliers (only for real frames)
+	// if (params.motion_distortion)
+	// {
+	// 	// Get an outlier score
+	// 	vector<float> scores(polar_pts.size(), 0.0);
+	// 	detect_outliers(polar_pts, scores, params.lidar_n_lines, lidar_angle_res, minTheta, params.outl_rjct_passes, params.outl_rjct_thresh);
+
+	// 	// Remove points with negative score
+	// 	filter_pointcloud(f_pts, scores, 0);
+	// 	filter_pointcloud(polar_pts, scores, 0);
+	// }
+
+	t.push_back(omp_get_wtime());
+
+	// Get subsampling of the frame in carthesian coordinates (New points are barycenters or not?)
+	grid_subsampling_centers(f_pts, sub_pts, sub_inds, params.frame_voxel_size);
+	//grid_subsampling_spheres(f_pts, sub_pts, params.frame_voxel_size);
+
+	// Convert sub_pts to polar and rescale
+	vector<PointXYZ> polar_queries0(sub_pts);
+	cart2pol_(polar_queries0);
+	vector<PointXYZ> polar_queries(polar_queries0);
+	lidar_log_radius(polar_queries, params.polar_r, params.r_scale);
+	lidar_horizontal_scale(polar_queries, params.h_scale);
+
+	// Get sub_rings
+	vector<int> sub_rings;
+	sub_rings.reserve(sub_inds.size());
+	for (int j = 0; j < (int)sub_inds.size(); j++)
+		sub_rings.push_back((int)f_rings[sub_inds[j]]);
+
+	t.push_back(omp_get_wtime());
+
+	/////////////////////
+	// Compute normals //
+	/////////////////////
+	
+	// Call polar processing function
+	extract_lidar_frame_normals(f_pts, polar_pts, sub_pts, polar_queries, sub_rings, normals, norm_scores, params.polar_r2s, params.n_threads);
+
+	t.push_back(omp_get_wtime());
+
+	/////////////////////////
+	// Get ground in frame //
+	/////////////////////////
+
+	// TODO: We can use this frame ground for other stuff, including ensuring planar ground???
+	// 		 We can also use the region growing code for ground detection. Do that?
+
+	// TODO: For complex corridor scenario, look into using the 3 normal orientations sampling of JE
+
+	// Ransac ground extraction
+	float vertical_thresh_deg = 20.0;
+	float max_dist = 0.1;
+	frame_ground = frame_ground_ransac(sub_pts, normals, vertical_thresh_deg, max_dist);
+
+	// Ensure ground normal is pointing upwards
+	if (frame_ground.u.z < 0)
+		frame_ground.reverse();
+
+	// Get height above ground
+	frame_ground.point_distances_signed(sub_pts, heights);
+
+	////////////////
+	// Get scores //
+	////////////////
+
+	// Better normal score vased on distance and incidence angle
+	smart_normal_score(sub_pts, polar_queries0, normals, norm_scores);
+
+	// ICP score between 1.0 and 6.0 (chance of being sampled during ICP)
+	icp_scores = vector<double>(norm_scores.begin(), norm_scores.end());
+	smart_icp_score(polar_queries0, normals, heights, icp_scores);
+
+	// Remove points with a negative score
+	float min_score = 0.0001;
+	filter_pointcloud(sub_pts, norm_scores, min_score);
+	filter_pointcloud(normals, norm_scores, min_score);
+	filter_anyvector(sub_inds, norm_scores, min_score);
+	filter_anyvector(icp_scores, norm_scores, min_score);
+	filter_anyvector(heights, norm_scores, min_score);
+	filter_floatvector(norm_scores, min_score);
 }
 
-void PointMapSLAM::gotCloud(const sensor_msgs::PointCloud2::ConstPtr& msg)
-{
-	// ROS_WARN_STREAM("Processing Cloud");
 
+void PointMapSLAM::gotVeloCloud(const sensor_msgs::PointCloud2::ConstPtr& msg)
+{
+	// Here we process raw lidar pointclouds
+	// In this implementation, we never update the 3D map. We assume we already have a map
 	if (params.filtering)
 	{
-		// 1. Using the prediction from the collider
-		// Here we process classified clouds so we update the map and map2D)
-		processCloud(msg, true, true);
+		// If predictions are provided, we do not update the 2D global costmap
+		processCloud(msg, false, false);
 
 	}
 	else
 	{
-		// 3. Using raw point clouds
+		// If no predictions, we update the 2D global costmap
 		processCloud(msg, false, true);
+	}
+}
+
+
+void PointMapSLAM::gotClassifCloud(const sensor_msgs::PointCloud2::ConstPtr& msg)
+{
+	// Here we process the classified point clouds (3 lidar frames already aligned)
+	if (params.filtering)
+	{
+		processClassifCloud(msg, true, true);
+
+	}
+	else
+	{
+		processClassifCloud(msg, false, true);
 	}
 
 	return;
 }
 
-void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map)
+
+void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map_2D)
 {
 	//////////////////////
 	// Optional verbose //
 	//////////////////////
 
-	// params.verbose = 1;
+	// params.verbose = 2;
+
+	bool update_map = false;
 
 	vector<string> clock_str;
-	vector<clock_t> t;
+	vector<double> t;
 	if (params.verbose)
 	{
 		clock_str.reserve(20);
 		t.reserve(20);
 		clock_str.push_back("Msg filtering ..... ");
 		clock_str.push_back("tf listener ....... ");
-		clock_str.push_back("Polar convertion .. ");
-		clock_str.push_back("Outlier reject .... ");
-		clock_str.push_back("Grid subsampling .. ");
-		clock_str.push_back("Frame normals ..... ");
-		clock_str.push_back("Normals filter .... ");
+		clock_str.push_back("Pre-polar ......... ");
+		clock_str.push_back("Pre-scale ......... ");
+		clock_str.push_back("Pre-sub ........... ");
+		clock_str.push_back("Pre-normals ....... ");
+		clock_str.push_back("Pre-filter ........ ");
 		clock_str.push_back("ICP localization .. ");
 		clock_str.push_back("Publish tf ........ ");
 		clock_str.push_back("Align sub_pts ..... ");
@@ -250,7 +355,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		clock_str.push_back("Map2D update ...... ");
 		clock_str.push_back("Map2D publish ..... ");
 	}
-	t.push_back(std::clock());
+	t.push_back(omp_get_wtime());
 
 	//////////////////////////////
 	// Read point cloud message //
@@ -275,7 +380,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	ushort last_ring = 0;
 	int scan_col = 0;
 	bool using_col = false;
-	int col_stride = 3;
+	int col_stride = 2;
 	vector<PointXYZ> f_pts;
 	vector<float> f_ts;
 	vector<ushort> f_rings;
@@ -365,7 +470,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		}
 	}
 
-	t.push_back(std::clock());
+	t.push_back(omp_get_wtime());
 
 	///////////////////////////////////////////
 	// Get init matrix from current odometry //
@@ -390,7 +495,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// Get the pose of the scanner in the map
 	Eigen::Matrix4d H_scannerToMap_init = H_OdomToMap * H_OdomToScanner.inverse();
 
-	t.push_back(std::clock());
+	t.push_back(omp_get_wtime());
 
 	// ROS_WARN_STREAM("TOdomToScanner(" << params.odom_frame << " to " << msg->header.frame_id << "):\n" << H_OdomToScanner);
 	// ROS_WARN_STREAM("TOdomToMap(" << params.odom_frame << " to " << params.map_frame << "):\n" << H_OdomToMap);
@@ -400,135 +505,20 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// Preprocess frame and compute normals //
 	//////////////////////////////////////////
 
-	// Create a copy of points in polar coordinates
-	vector<PointXYZ> polar_pts(f_pts);
-	cart2pol_(polar_pts);
-
-	t.push_back(std::clock());
-
-	// Get angle for each lidar point, and the corresponding polar_r2
-	if (params.polar_r2s.size() < 1)
-	{
-		vector<float> lidar_angles;
-		get_lidar_angles(polar_pts, lidar_angles, params.lidar_n_lines);
-		params.polar_r2s.reserve(lidar_angles.size());
-		int j = 0;
-		float tmp = 1.5 * (lidar_angles[j + 1] - lidar_angles[j]);
-		params.polar_r2s.push_back(tmp * tmp);
-		j++;
-		while (j < lidar_angles.size() - 1)
-		{
-			tmp = 1.5 * min(lidar_angles[j+1] - lidar_angles[j], lidar_angles[j] - lidar_angles[j-1]);
-			params.polar_r2s.push_back(tmp * tmp);
-			j++;
-		}
-		tmp = 1.5 * (lidar_angles[j] - lidar_angles[j-1]);
-		params.polar_r2s.push_back(tmp * tmp);
-
-		// Get lidar angle resolution
-		float minTheta, maxTheta;
-		float lidar_angle_res = get_lidar_angle_res(polar_pts, minTheta, maxTheta, params.lidar_n_lines);
-		params.polar_r = 1.5 * lidar_angle_res;
-	}
-
-	// Apply log scale to radius coordinate (in place)
-	lidar_log_radius(polar_pts, params.polar_r, params.r_scale);
-
-	// // Remove outliers (only for real frames)
-	// if (params.motion_distortion)
-	// {
-
-	// 	// TODO: HERE modify outlier detection, using lidar angles
-	// 	//			reduce the number of operations done by saving dtheta_min, in variable for example
-
-	// 	string path = "/home/administrator/1-Deep-Collider/results/test_ptmap/";
-	// 	char buffer[200];
-	// 	sprintf(buffer, "debug_rtp_%05d.ply", n_frames);
-	// 	string filepath = path + string(buffer);
-	// 	save_cloud(filepath, polar_pts);
-
-	// 	// Get an outlier score
-	// 	vector<float> scores(polar_pts.size(), 0.0);
-	// 	detect_outliers(polar_pts, scores, params.lidar_n_lines, lidar_angles, minTheta, params.outl_rjct_passes, params.outl_rjct_thresh);
-
-	// 	// Remove points with negative score
-	// 	filter_pointcloud(f_pts, scores, 0);
-	// 	filter_pointcloud(polar_pts, scores, 0);
-
-	// 	char buffer2[200];
-	// 	sprintf(buffer2, "clean_rtp_%05d.ply", n_frames);
-	// 	string filepath2 = path + string(buffer2);
-	// 	save_cloud(filepath2, polar_pts);
-	// }
-
-	t.push_back(std::clock());
-
-	// Get subsampling of the frame in carthesian coordinates
 	vector<PointXYZ> sub_pts;
-	vector<size_t> sub_inds;
-	grid_subsampling_centers(f_pts, sub_pts, sub_inds, params.frame_voxel_size);
-
-	t.push_back(std::clock());
-
-	// Convert sub_pts to polar and rescale
-	vector<PointXYZ> polar_queries0(sub_pts);
-	cart2pol_(polar_queries0);
-	vector<PointXYZ> polar_queries(polar_queries0);
-	lidar_log_radius(polar_queries, params.polar_r, params.r_scale);
-	lidar_horizontal_scale(polar_queries, params.h_scale);
-
-	// ROS_WARN_STREAM(" ------> " << f_pts.size() << " " << sub_pts.size() << " " << sub_inds.size() << " " << params.frame_voxel_size);
-
-	/////////////////////
-	// Compute normals //
-	/////////////////////
-
-	// Init result containers
 	vector<PointXYZ> normals;
 	vector<float> norm_scores;
+	vector<double> icp_scores;
+	vector<size_t> sub_inds;
+	Plane3D frame_ground;
+	vector<float> heights;
+	preprocess_frame(f_pts, f_ts, f_rings, sub_pts, normals, norm_scores, icp_scores, sub_inds, frame_ground, heights, params, t);
+	
 
-	// Apply horizontal scaling (to have smaller neighborhoods in horizontal direction)
-	lidar_horizontal_scale(polar_pts, params.h_scale);
-
-	// Get sub_rings
-	vector<int> sub_rings;
-	sub_rings.reserve(sub_inds.size());
-	for (int j = 0; j < sub_inds.size(); j++)
-		sub_rings.push_back((int)f_rings[sub_inds[j]]);
-
-	// Call polar processing function
-	extract_lidar_frame_normals(f_pts, polar_pts, sub_pts, polar_queries, sub_rings, normals, norm_scores, params.polar_r2s);
-
-	t.push_back(std::clock());
-
-	// Better normal score based on distance and incidence angle
-	vector<float> icp_scores(norm_scores);
-	smart_icp_score(polar_queries0, icp_scores);
-	smart_normal_score(sub_pts, polar_queries0, normals, norm_scores);
-
-	// Remove points with a low score
-	float min_score = 0.01;
-	min_score = -10000;
-	filter_pointcloud(sub_pts, norm_scores, min_score);
-	filter_pointcloud(normals, norm_scores, min_score);
-	filter_anyvector(sub_inds, norm_scores, min_score);
-	filter_anyvector(icp_scores, norm_scores, min_score);
-	filter_floatvector(norm_scores, min_score);
 	
 	// Min and max times (dont loop on the whole frame as it is useless)
 	float loop_ratio = 0.01;
-	float t_min = f_ts[0];
-	float t_max = f_ts[0];
-	for (int j = 0; (float)j < loop_ratio * (float)f_ts.size();  j++)
-	{
-		if (f_ts[j] < t_min)
-			t_min = f_ts[j];
-	}
-	for (int j = (int)floor((1 - loop_ratio) * f_ts.size()); j < f_ts.size();  j++)
-	{
-		if (f_ts[j] > t_max)
-			t_max = f_ts[j];
-	}
+	get_min_max_times(f_ts, t_min, t_max, loop_ratio);
 	
 	// Initial interpolation time
 	float t0;
@@ -539,20 +529,20 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 
 
-	// Get the motion_distorsion values from timestamps
+	// Get the motion_distortion values from timestamps
 	// 0 for t0 (old t_min) and 1 for t_max
 	vector<float> sub_alphas;
 	if (params.motion_distortion)
 	{
 		float inv_factor = 1 / (t_max - t0);
 		sub_alphas.reserve(sub_inds.size());
-		for (int j = 0; j < sub_inds.size(); j++)
+		for (int j = 0; j < (int)sub_inds.size(); j++)
 			sub_alphas.push_back((f_ts[sub_inds[j]] - t0) * inv_factor);
 	}
 
 	
 
-	t.push_back(std::clock());
+	t.push_back(omp_get_wtime());
 
 	/////////////////////////////////
 	// Align frame on map with ICP //
@@ -567,18 +557,56 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		params.icp_params.last_transform0 = H_scannerToMap_init;
 	}
 	if (map.size() < 1)
-	{
-		// Case where we do not have a map yet. Override the first cloud position so that ground is at z=0
+	{ // Case where we do not have a map yet. Override the first cloud position so that ground is at z=0
+		
+		// Get transformation that make the ground plane horizontal
+		Eigen::Matrix3d ground_R;
+		if (!rot_u_to_v(frame_ground.u, PointXYZ(0, 0, 1), ground_R))
+			ground_R = Eigen::Matrix3d::Identity();
+		
+		// Get a point that belongs to the ground
+		float min_dist = 1e9;
+		PointXYZ ground_P;
+		for (int j = 0; j < (int)heights.size(); j++)
+		{
+			float dist = abs(heights[j]);
+			if (dist < min_dist)
+			{
+				min_dist = dist;
+				ground_P = sub_pts[j];
+			}
+		}
+
+		// Rotate point and get new ground height
+		Eigen::Map<Eigen::Matrix<float, 3, 1>> ground_P_mat((float*)&ground_P, 3, 1);
+		ground_P_mat = ground_R.cast<float>() * ground_P_mat;
+
+		// // Update icp parameters to trigger flat ground
+		params.icp_params.ground_w = 9.0;
+		params.icp_params.ground_z = 0.0;
+
+		// Update result transform
 		icp_results.transform = Eigen::Matrix4d::Identity();
-		icp_results.transform(2, 3) = 0.7;
+		icp_results.transform.block(0, 0, 3, 3) = ground_R;
+		icp_results.transform(2, 3) = - ground_P_mat(2);
 		params.icp_params.last_transform0 = icp_results.transform;
 	}
 	else
 	{
 		if (n_frames < 1)
 		{
+			// Case where we have a map, and the first frame needs to be aligned
+			// We assume robot is still in the beginning so no motion distortion
+
+			// 1. Initial RANSAC alignment
+
+
+
+			// 2. ICP refine
 
 			// TODO: Here we need to handle initial alignment case
+			H_scannerToMap_init = Eigen::Matrix4d::Identity();
+			H_scannerToMap_init(2, 3) = 0.7;
 
 			// Case where we have a map, and the first frame needs to be aligned
 			// We assume robot is still in the beginning so no motion distortion
@@ -587,7 +615,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 			PointToMapICP(sub_pts, sub_alphas, icp_scores, map, params.icp_params, icp_results);
 			params.icp_params.motion_distortion = params.motion_distortion;
 
-			// We override last_transform0 too to neglate motion distorsion for this first frame
+			// We override last_transform0 too to neglate motion distortion for this first frame
 			params.icp_params.last_transform0 = icp_results.transform;
 		}
 		else
@@ -597,14 +625,14 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		}
 
 		// Safe Check
-		if (icp_results.all_plane_rms.size() > 3 * params.icp_params.avg_steps)
+		if (icp_results.all_plane_rms.size() > 0.4 * params.icp_params.max_iter)
 			ROS_WARN_STREAM("WARNING: ICP num_iter = " << icp_results.all_plane_rms.size());
 
 		if (icp_results.all_plane_rms.size() > 0.9 * params.icp_params.max_iter)
 			ROS_ERROR_STREAM("ERROR: ICP num_iter = " << icp_results.all_plane_rms.size());
 	}
 
-	t.push_back(std::clock());
+	t.push_back(omp_get_wtime());
 
 	///////////////////////
 	// Publish transform //
@@ -626,7 +654,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	}
 	// ROS_WARN_STREAM("TOdomToMap:\n" << H_OdomToMap);
 
-	t.push_back(std::clock());
+	t.push_back(omp_get_wtime());
 
 	////////////////////
 	// Update the map //
@@ -675,46 +703,64 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		}
 	}
 
-	t.push_back(std::clock());
+	t.push_back(omp_get_wtime());
 
 	if (update_map)
 	{
 		// The update function is called only on subsampled points as the others have no normal
-		map.update(sub_pts, normals, norm_scores);
+		map.update(sub_pts, normals, norm_scores, n_frames);
 	}
 
-	t.push_back(std::clock());
+	t.push_back(omp_get_wtime());
+
 
 	// Update the 2D map
 	PointXYZ center;
 	vector<PointXYZ> f_2Dpts;
+	vector<int> f_2Drings;
+	vector<float> f_2Dts;
+	// vector<float> heights_2D;
 
-	if (update_map)
+	vector<ushort> wanted_rings = {0, 1, 2, 14};
+
+	if (update_map_2D)
 	{
 		// Only use some rings not all
 		f_2Dpts.reserve(f_pts.size());
-		int i_2D = 0;
-		for (auto& ring : f_rings)
+		f_2Dts.reserve(f_ts.size());
+		
+		for (size_t i_2D = 0; i_2D < f_rings.size(); i_2D++)
 		{
-			if (ring == 18 || ring == 15 || ring == 12)
+			auto found_r = find(wanted_rings.begin(), wanted_rings.end(), f_rings[i_2D]);
+			if (found_r != wanted_rings.end())
+			{
 				f_2Dpts.push_back(f_pts[i_2D]);
-			i_2D++;
+				f_2Dts.push_back(f_ts[i_2D]);
+				f_2Drings.push_back((int)(found_r - wanted_rings.begin()));
+			}
 		}
+
+		// // Compute height for these rings
+		// frame_ground.point_distances_signed(f_2Dpts, heights_2D);
 
 		if (params.motion_distortion)
 		{
 			Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat_f((float *)f_2Dpts.data(), 3, f_2Dpts.size());
 			float inv_factor = 1 / (t_max - t0);
+			#pragma omp parallel for schedule(static) num_threads(params.n_threads)
 			for (int i = 0; i < f_2Dpts.size(); i++)
 			{
-				float alpha = (f_ts[i] - t0) * inv_factor;
+				float alpha = (f_2Dts[i] - t0) * inv_factor;
 				Eigen::Matrix4d H_rect = pose_interp(alpha, params.icp_params.last_transform0, icp_results.transform, 0);	
 				Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
 				Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
 				pts_mat_f.col(i) = (R_rect * pts_mat_f.col(i)) + T_rect;
-				center.x = T_rect.x();
-				center.y = T_rect.y();
-				center.z = T_rect.z();
+				if (i == f_2Dpts.size() / 2)
+				{
+					center.x = T_rect.x();
+					center.y = T_rect.y();
+					center.z = T_rect.z();
+				}
 			}
 		}
 		else
@@ -729,49 +775,50 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		}
 	}
 
-	t.push_back(std::clock());
+	t.push_back(omp_get_wtime());
 
-	if (update_map || map2D.size() < 1)
+
+	if (update_map_2D || map2D.size() < 1)
 	{
-
-		// Detect ground plane for height filtering
-		Plane3D ground_P = extract_ground(sub_pts, normals);
-
 		// Update 2D map
-		map2D.update_from_3D(f_2Dpts, center, ground_P, params.map2d_zMin, params.map2d_zMax);
+		map2D.update_from_3D(f_2Dpts, f_2Drings, wanted_rings.size(), center, params.map2d_zMin, params.map2d_zMax);
 	}
 
 	// // DEBUG ////////////////////////////
 
-	// if (map2D.size() > 0 && n_frames % 1 == 0)
-	// {
-	// 	// string path = "/home/administrator/1-Deep-Collider/results/test_ptmap/";
-	// 	string path = "/home/administrator/catkin_ws/src/point_slam_2/src/test_maps/maps/";
-	// 	char buffer[200];
-	// 	char buffer_dist[200];
-	// 	sprintf(buffer, "debug_frame_%05d.ply", n_frames);
-	// 	sprintf(buffer_dist, "debug_frame_dist_%05d.ply", n_frames);
-	// 	string filepath = path + string(buffer);
-	// 	string filepath_dist = path + string(buffer_dist);
-	// 	vector<float> distances;
-	// 	// ground_P.point_distances(f_pts, distances);
-	// 	// save_cloud(filepath, f_pts, distances);
-	// 	save_cloud(filepath, f_pts);
-	// 	save_cloud(filepath_dist, f_pts_dist);
-		
-	// 	map.debug_save_ply(path, n_frames);
-	// 	map2D.debug_save_ply(path, n_frames);
+	// // Debug is case of strong angular rotation
+	// Eigen::Matrix3d R2 = icp_results.transform.block(0, 0, 3, 3);
+	// Eigen::Matrix3d R1 = params.icp_params.last_transform0.block(0, 0, 3, 3);
+	// R1 = R2 * R1.transpose();
+	// float dR = acos((R1.trace() - 1) / 2);
 
-	// 	// ROS_WARN_STREAM(">>>>>>>>>>>>> " << n_frames << ": " << ground_P.u << " " << ground_P.d);
+	// if (dR * 180 / M_PI > 8)
+	// {
+	// 	cout << string(90, ' ') << " DEBUG because of high rotation: " << dR * 180 / M_PI << " deg" << endl;
+
+	// 	string path = "/home/administrator/1-Deep-Collider/results/tmp/";
+	// 	char buffer[200];
+	// 	sprintf(buffer, "debug_%05d_f_pts.ply", n_frames);
+	// 	save_cloud(path + string(buffer), f_pts);
+
+	// 	sprintf(buffer, "debug_%05d_f_2Ds.ply", n_frames);
+	// 	save_cloud(path + string(buffer), f_2Dpts, heights_2D);
+
+	// 	sprintf(buffer, "debug_%05d_f_sub.ply", n_frames);
+	// 	vector<float> f12(icp_scores.begin(), icp_scores.end());
+	// 	f12.insert(f12.end(), norm_scores.begin(),  norm_scores.end());
+	// 	save_cloud(path + string(buffer), sub_pts, normals, f12);
 	// }
 
 	// /////////////////////////////////////
 
-	t.push_back(std::clock());
+	t.push_back(omp_get_wtime());
 
-	publish_2D_map();
+	// Once for the initialization of ros global_costmap
+	if (n_frames < 2 || true)
+		publish_2D_map();
 
-	t.push_back(std::clock());
+	t.push_back(omp_get_wtime());
 	
 	// Update the last pose for future frames
 	if (stamp > latest_stamp)
@@ -794,15 +841,14 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		all_H.push_back(icp_results.transform);
 		f_times.push_back(stamp);
 		latest_stamp = stamp;
-		if (update_map)
-			n_frames++;
+		n_frames++;
 	}
 
 	////////////////////////
 	// Debugging messages //
 	////////////////////////
 
-	double duration = 1000 * (t[t.size() - 1] - t[0]) / (double)CLOCKS_PER_SEC;
+	double duration = 1000 * (t[t.size() - 1] - t[0]);
 	
 	cout << "[point_slam]: Processed Frame " << msg->header.frame_id << " with stamp " << stamp << " in " <<  duration << " ms" << endl;
 
@@ -810,7 +856,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	{
 		for (size_t i = 0; i < min(t.size() - 1, clock_str.size()); i++)
 		{
-			double duration = 1000 * (t[i + 1] - t[i]) / (double)CLOCKS_PER_SEC;
+			double duration = 1000 * (t[i + 1] - t[i]);
 			cout << clock_str[i] << duration << " ms" << endl;
 		}
 		cout << endl << "***********************" << endl << endl;
@@ -818,6 +864,498 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 	return;
 }
+
+
+void PointMapSLAM::processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map_2D)
+{
+	//////////////////////
+	// Optional verbose //
+	//////////////////////
+
+	// params.verbose = 2;
+
+	bool update_map = false;
+
+	vector<string> clock_str;
+	vector<double> t;
+	if (params.verbose)
+	{
+		clock_str.reserve(20);
+		t.reserve(20);
+		clock_str.push_back("Msg filtering ..... ");
+		clock_str.push_back("tf listener ....... ");
+		clock_str.push_back("Pre-polar ......... ");
+		clock_str.push_back("Pre-scale ......... ");
+		clock_str.push_back("Pre-sub ........... ");
+		clock_str.push_back("Pre-normals ....... ");
+		clock_str.push_back("Pre-filter ........ ");
+		clock_str.push_back("ICP localization .. ");
+		clock_str.push_back("Publish tf ........ ");
+		clock_str.push_back("Align sub_pts ..... ");
+		clock_str.push_back("Map update ........ ");
+		clock_str.push_back("Align f_pts ....... ");
+		clock_str.push_back("Map2D update ...... ");
+		clock_str.push_back("Map2D publish ..... ");
+	}
+	t.push_back(omp_get_wtime());
+
+	//////////////////////////////
+	// Read point cloud message //
+	//////////////////////////////
+
+	// Get the number of points
+	size_t N = (size_t)(msg->width * msg->height);
+
+	// Get timestamp
+	ros::Time stamp = msg->header.stamp;
+
+	// Ignore frames if not enough points
+	if (msg->header.seq < 1 || N < 100)
+	{
+		ROS_WARN_STREAM("Frame #" << msg->header.seq << " with only " << N << " points is ignored.");
+		return;
+	}
+
+	// Loop over points and copy in vector container. Do the filtering if necessary
+	vector<PointXYZ> f_pts;
+	f_pts.reserve(N);
+	if (filtering)
+	{
+		sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x"), iter_y(*msg, "y");
+		sensor_msgs::PointCloud2ConstIterator<uint8_t> iter_i(*msg, "label");
+		for (sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
+			 iter_z != iter_z.end();
+			 ++iter_x, ++iter_y, ++iter_z, ++iter_i)
+		{
+			// Reject points with wrong labels
+			if (find(params.loc_labels.begin(), params.loc_labels.end(), (int)*iter_i) == params.loc_labels.end())
+				continue;
+
+			// Reject NaN values
+			if (isnan(*iter_x) || isnan(*iter_y) || isnan(*iter_z))
+			{
+				ROS_WARN_STREAM("rejected for NaN in point(" << *iter_x << ", " << *iter_y << ", " << *iter_z << ")");
+				continue;
+			}
+
+			// Add kept points to the vector container
+			f_pts.push_back(PointXYZ(*iter_x, *iter_y, *iter_z));
+		}
+	}
+	else
+	{
+		sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x"), iter_y(*msg, "y");
+		for (sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
+			 iter_z != iter_z.end();
+			 ++iter_x, ++iter_y, ++iter_z)
+		{
+			// Reject NaN values
+			if (isnan(*iter_x) || isnan(*iter_y) || isnan(*iter_z))
+			{
+				ROS_WARN_STREAM("rejected for NaN in point(" << *iter_x << ", " << *iter_y << ", " << *iter_z << ")");
+				continue;
+			}
+
+			// Add all points to the vector container
+			f_pts.push_back(PointXYZ(*iter_x, *iter_y, *iter_z));
+		}
+	}
+
+	t.push_back(omp_get_wtime());
+
+	// ///////////////////////////////////////////
+	// // Get init matrix from current odometry //
+	// ///////////////////////////////////////////
+
+	// // Get current pose of the scanner in the odom frame
+	// Eigen::Matrix4d H_OdomToScanner;
+	// try
+	// {
+	// 	H_OdomToScanner = transformListenerToEigenMatrix(tfListener, msg->header.frame_id, params.odom_frame, stamp);
+	// }
+	// catch (tf::ExtrapolationException e)
+	// {
+	// 	ROS_ERROR_STREAM("Extrapolation Exception. stamp = " << stamp << " now = " << ros::Time::now() << " delta = " << ros::Time::now() - stamp);
+	// 	return;
+	// }
+
+	// // If no odometry is given, previous one
+	// if (H_OdomToScanner.lpNorm<1>() < 0.001)
+	// 	H_OdomToScanner = last_H.inverse() * H_OdomToMap;
+
+	// // Get the pose of the scanner in the map
+	// Eigen::Matrix4d H_scannerToMap_init = H_OdomToMap * H_OdomToScanner.inverse();
+
+	// t.push_back(omp_get_wtime());
+
+	// // ROS_WARN_STREAM("TOdomToScanner(" << params.odom_frame << " to " << msg->header.frame_id << "):\n" << H_OdomToScanner);
+	// // ROS_WARN_STREAM("TOdomToMap(" << params.odom_frame << " to " << params.map_frame << "):\n" << H_OdomToMap);
+	// // ROS_WARN_STREAM("TscannerToMap (" << msg->header.frame_id << " to " << params.map_frame << "):\n" << H_scannerToMap_init);
+
+	// //////////////////////////////////////////
+	// // Preprocess frame and compute normals //
+	// //////////////////////////////////////////
+
+	// vector<PointXYZ> sub_pts;
+	// vector<PointXYZ> normals;
+	// vector<float> norm_scores;
+	// vector<double> icp_scores;
+	// vector<size_t> sub_inds;
+	// Plane3D frame_ground;
+	// vector<float> heights;
+	// preprocess_frame(f_pts, f_ts, f_rings, sub_pts, normals, norm_scores, icp_scores, sub_inds, frame_ground, heights, params, t);
+	
+
+	
+	// // Min and max times (dont loop on the whole frame as it is useless)
+	// float loop_ratio = 0.01;
+	// get_min_max_times(f_ts, t_min, t_max, loop_ratio);
+	
+	// // Initial interpolation time
+	// float t0;
+	// if (map.size() < 1 || params.icp_params.max_iter < 1)
+	// 	t0 = t_min - (t_max - t_min);
+	// else
+	// 	t0 = params.icp_params.last_time + (float)(latest_stamp.toSec() - stamp.toSec());
+
+
+
+	// // Get the motion_distortion values from timestamps
+	// // 0 for t0 (old t_min) and 1 for t_max
+	// vector<float> sub_alphas;
+	// if (params.motion_distortion)
+	// {
+	// 	float inv_factor = 1 / (t_max - t0);
+	// 	sub_alphas.reserve(sub_inds.size());
+	// 	for (int j = 0; j < (int)sub_inds.size(); j++)
+	// 		sub_alphas.push_back((f_ts[sub_inds[j]] - t0) * inv_factor);
+	// }
+
+	
+
+	// t.push_back(omp_get_wtime());
+
+	// /////////////////////////////////
+	// // Align frame on map with ICP //
+	// /////////////////////////////////
+
+	// // Create result containers
+	// ICP_results icp_results;
+
+	// if (n_frames < 1)
+	// {
+	// 	// In all cases if it is the first frame init the last_transform0
+	// 	params.icp_params.last_transform0 = H_scannerToMap_init;
+	// }
+	// if (map.size() < 1)
+	// { // Case where we do not have a map yet. Override the first cloud position so that ground is at z=0
+		
+	// 	// Get transformation that make the ground plane horizontal
+	// 	Eigen::Matrix3d ground_R;
+	// 	if (!rot_u_to_v(frame_ground.u, PointXYZ(0, 0, 1), ground_R))
+	// 		ground_R = Eigen::Matrix3d::Identity();
+		
+	// 	// Get a point that belongs to the ground
+	// 	float min_dist = 1e9;
+	// 	PointXYZ ground_P;
+	// 	for (int j = 0; j < (int)heights.size(); j++)
+	// 	{
+	// 		float dist = abs(heights[j]);
+	// 		if (dist < min_dist)
+	// 		{
+	// 			min_dist = dist;
+	// 			ground_P = sub_pts[j];
+	// 		}
+	// 	}
+
+	// 	// Rotate point and get new ground height
+	// 	Eigen::Map<Eigen::Matrix<float, 3, 1>> ground_P_mat((float*)&ground_P, 3, 1);
+	// 	ground_P_mat = ground_R.cast<float>() * ground_P_mat;
+
+	// 	// // Update icp parameters to trigger flat ground
+	// 	params.icp_params.ground_w = 9.0;
+	// 	params.icp_params.ground_z = 0.0;
+
+	// 	// Update result transform
+	// 	icp_results.transform = Eigen::Matrix4d::Identity();
+	// 	icp_results.transform.block(0, 0, 3, 3) = ground_R;
+	// 	icp_results.transform(2, 3) = - ground_P_mat(2);
+	// 	params.icp_params.last_transform0 = icp_results.transform;
+	// }
+	// else
+	// {
+	// 	if (n_frames < 1)
+	// 	{
+	// 		// Case where we have a map, and the first frame needs to be aligned
+	// 		// We assume robot is still in the beginning so no motion distortion
+
+	// 		// 1. Initial RANSAC alignment
+
+
+
+	// 		// 2. ICP refine
+
+	// 		// TODO: Here we need to handle initial alignment case
+	// 		H_scannerToMap_init = Eigen::Matrix4d::Identity();
+	// 		H_scannerToMap_init(2, 3) = 0.7;
+
+	// 		// Case where we have a map, and the first frame needs to be aligned
+	// 		// We assume robot is still in the beginning so no motion distortion
+	// 		params.icp_params.init_transform = H_scannerToMap_init;
+	// 		params.icp_params.motion_distortion = false;
+	// 		PointToMapICP(sub_pts, sub_alphas, icp_scores, map, params.icp_params, icp_results);
+	// 		params.icp_params.motion_distortion = params.motion_distortion;
+
+	// 		// We override last_transform0 too to neglate motion distortion for this first frame
+	// 		params.icp_params.last_transform0 = icp_results.transform;
+	// 	}
+	// 	else
+	// 	{
+	// 		params.icp_params.init_transform = H_scannerToMap_init;
+	// 		PointToMapICP(sub_pts, sub_alphas, icp_scores, map, params.icp_params, icp_results);
+	// 	}
+
+	// 	// Safe Check
+	// 	if (icp_results.all_plane_rms.size() > 0.4 * params.icp_params.max_iter)
+	// 		ROS_WARN_STREAM("WARNING: ICP num_iter = " << icp_results.all_plane_rms.size());
+
+	// 	if (icp_results.all_plane_rms.size() > 0.9 * params.icp_params.max_iter)
+	// 		ROS_ERROR_STREAM("ERROR: ICP num_iter = " << icp_results.all_plane_rms.size());
+	// }
+
+	// t.push_back(omp_get_wtime());
+
+	// ///////////////////////
+	// // Publish transform //
+	// ///////////////////////
+	
+	// // Update the last pose for future frames
+	// float alpha0 = (t_min - t0) / (t_max - t0);
+	// Eigen::Matrix4d new_H_scannerToMap = pose_interp(alpha0, params.icp_params.last_transform0, icp_results.transform, 0);
+
+	// // Compute tf
+	// //publishStamp = stamp;
+	// //publishLock.lock();
+	// H_OdomToMap = new_H_scannerToMap * H_OdomToScanner;
+
+	// // Publish tf
+	// if (stamp > latest_stamp)
+	// {
+	// 	tfBroadcaster.sendTransform(tf::StampedTransform(eigenMatrixToTransform(H_OdomToMap), stamp, params.map_frame, params.odom_frame));
+	// }
+	// // ROS_WARN_STREAM("TOdomToMap:\n" << H_OdomToMap);
+
+	// t.push_back(omp_get_wtime());
+
+	// ////////////////////
+	// // Update the map //
+	// ////////////////////
+
+	// // //debug deep copies
+	// // vector<PointXYZ> sub_pts_dist = sub_pts;
+	// // vector<PointXYZ> normals_dist = normals;
+	// // vector<PointXYZ> f_pts_dist = f_pts;
+
+	// if (update_map)
+	// {
+	// 	if (params.motion_distortion)
+	// 	{
+	// 		// Update map taking motion distortion into account
+	// 		size_t i_inds = 0;
+	// 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
+	// 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
+	// 		for (auto& alpha : sub_alphas)
+	// 		{
+	// 			Eigen::Matrix4d H_rect = pose_interp(alpha, params.icp_params.last_transform0, icp_results.transform, 0);
+	// 			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
+	// 			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+	// 			pts_mat.col(i_inds) = (R_rect * pts_mat.col(i_inds)) + T_rect;
+	// 			norms_mat.col(i_inds) = (R_rect * norms_mat.col(i_inds));
+	// 			i_inds++;
+	// 		}
+
+	// 		// //debug 
+	// 		// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat_dist((float *)sub_pts_dist.data(), 3, sub_pts_dist.size());
+	// 		// Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat_dist((float *)normals_dist.data(), 3, normals_dist.size());
+	// 		// Eigen::Matrix3f R_tot = (new_H_scannerToMap.block(0, 0, 3, 3)).cast<float>();
+	// 		// Eigen::Vector3f T_tot = (new_H_scannerToMap.block(0, 3, 3, 1)).cast<float>();
+	// 		// pts_mat_dist = (R_tot * pts_mat_dist).colwise() + T_tot;
+	// 		// norms_mat_dist = R_tot * norms_mat_dist;
+
+	// 	}
+	// 	else
+	// 	{
+	// 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)sub_pts.data(), 3, sub_pts.size());
+	// 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> norms_mat((float *)normals.data(), 3, normals.size());
+	// 		Eigen::Matrix3f R_tot = (icp_results.transform.block(0, 0, 3, 3)).cast<float>();
+	// 		Eigen::Vector3f T_tot = (icp_results.transform.block(0, 3, 3, 1)).cast<float>();
+	// 		pts_mat = (R_tot * pts_mat).colwise() + T_tot;
+	// 		norms_mat = R_tot * norms_mat;
+	// 	}
+	// }
+
+	// t.push_back(omp_get_wtime());
+
+	// if (update_map)
+	// {
+	// 	// The update function is called only on subsampled points as the others have no normal
+	// 	map.update(sub_pts, normals, norm_scores, n_frames);
+	// }
+
+	// t.push_back(omp_get_wtime());
+
+
+	// // Update the 2D map
+	// PointXYZ center;
+	// vector<PointXYZ> f_2Dpts;
+	// vector<int> f_2Drings;
+	// vector<float> f_2Dts;
+	// // vector<float> heights_2D;
+
+	// vector<ushort> wanted_rings = {0, 1, 2, 14};
+
+	// if (update_map_2D)
+	// {
+	// 	// Only use some rings not all
+	// 	f_2Dpts.reserve(f_pts.size());
+	// 	f_2Dts.reserve(f_ts.size());
+		
+	// 	for (size_t i_2D = 0; i_2D < f_rings.size(); i_2D++)
+	// 	{
+	// 		auto found_r = find(wanted_rings.begin(), wanted_rings.end(), f_rings[i_2D]);
+	// 		if (found_r != wanted_rings.end())
+	// 		{
+	// 			f_2Dpts.push_back(f_pts[i_2D]);
+	// 			f_2Dts.push_back(f_ts[i_2D]);
+	// 			f_2Drings.push_back((int)(found_r - wanted_rings.begin()));
+	// 		}
+	// 	}
+
+	// 	// // Compute height for these rings
+	// 	// frame_ground.point_distances_signed(f_2Dpts, heights_2D);
+
+	// 	if (params.motion_distortion)
+	// 	{
+	// 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat_f((float *)f_2Dpts.data(), 3, f_2Dpts.size());
+	// 		float inv_factor = 1 / (t_max - t0);
+	// 		#pragma omp parallel for schedule(static) num_threads(params.n_threads)
+	// 		for (int i = 0; i < f_2Dpts.size(); i++)
+	// 		{
+	// 			float alpha = (f_2Dts[i] - t0) * inv_factor;
+	// 			Eigen::Matrix4d H_rect = pose_interp(alpha, params.icp_params.last_transform0, icp_results.transform, 0);	
+	// 			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
+	// 			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
+	// 			pts_mat_f.col(i) = (R_rect * pts_mat_f.col(i)) + T_rect;
+	// 			if (i == f_2Dpts.size() / 2)
+	// 			{
+	// 				center.x = T_rect.x();
+	// 				center.y = T_rect.y();
+	// 				center.z = T_rect.z();
+	// 			}
+	// 		}
+	// 	}
+	// 	else
+	// 	{
+	// 		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)f_2Dpts.data(), 3, f_2Dpts.size());
+	// 		Eigen::Matrix3f R_tot = (icp_results.transform.block(0, 0, 3, 3)).cast<float>();
+	// 		Eigen::Vector3f T_tot = (icp_results.transform.block(0, 3, 3, 1)).cast<float>();
+	// 		pts_mat = (R_tot * pts_mat).colwise() + T_tot;
+	// 		center.x = T_tot.x();
+	// 		center.y = T_tot.y();
+	// 		center.z = T_tot.z();
+	// 	}
+	// }
+
+	// t.push_back(omp_get_wtime());
+
+
+	// if (update_map_2D || map2D.size() < 1)
+	// {
+	// 	// Update 2D map
+	// 	map2D.update_from_3D(f_2Dpts, f_2Drings, wanted_rings.size(), center, params.map2d_zMin, params.map2d_zMax);
+	// }
+
+	// // // DEBUG ////////////////////////////
+
+	// // // Debug is case of strong angular rotation
+	// // Eigen::Matrix3d R2 = icp_results.transform.block(0, 0, 3, 3);
+	// // Eigen::Matrix3d R1 = params.icp_params.last_transform0.block(0, 0, 3, 3);
+	// // R1 = R2 * R1.transpose();
+	// // float dR = acos((R1.trace() - 1) / 2);
+
+	// // if (dR * 180 / M_PI > 8)
+	// // {
+	// // 	cout << string(90, ' ') << " DEBUG because of high rotation: " << dR * 180 / M_PI << " deg" << endl;
+
+	// // 	string path = "/home/administrator/1-Deep-Collider/results/tmp/";
+	// // 	char buffer[200];
+	// // 	sprintf(buffer, "debug_%05d_f_pts.ply", n_frames);
+	// // 	save_cloud(path + string(buffer), f_pts);
+
+	// // 	sprintf(buffer, "debug_%05d_f_2Ds.ply", n_frames);
+	// // 	save_cloud(path + string(buffer), f_2Dpts, heights_2D);
+
+	// // 	sprintf(buffer, "debug_%05d_f_sub.ply", n_frames);
+	// // 	vector<float> f12(icp_scores.begin(), icp_scores.end());
+	// // 	f12.insert(f12.end(), norm_scores.begin(),  norm_scores.end());
+	// // 	save_cloud(path + string(buffer), sub_pts, normals, f12);
+	// // }
+
+	// // /////////////////////////////////////
+
+	// t.push_back(omp_get_wtime());
+
+	// // Once for the initialization of ros global_costmap
+	// if (n_frames < 2 || true)
+	// 	publish_2D_map();
+
+	// t.push_back(omp_get_wtime());
+	
+	// // Update the last pose for future frames
+	// if (stamp > latest_stamp)
+	// {
+	// 	params.icp_params.last_transform1 = icp_results.transform;
+	// 	params.icp_params.last_transform0 = new_H_scannerToMap;
+	// 	params.icp_params.last_time = t_min;
+	// }
+
+	// // Update the pose correction from map to odom
+	// H_OdomToMap = params.icp_params.last_transform1 * H_OdomToScanner;
+
+	// // Update the last pose for future frames
+	// last_H = icp_results.transform;
+
+
+	// // Save all poses
+	// if (stamp > latest_stamp)
+	// {
+	// 	all_H.push_back(icp_results.transform);
+	// 	f_times.push_back(stamp);
+	// 	latest_stamp = stamp;
+	// 	n_frames++;
+	// }
+
+	// ////////////////////////
+	// // Debugging messages //
+	// ////////////////////////
+
+	// double duration = 1000 * (t[t.size() - 1] - t[0]);
+	
+	// cout << "[point_slam]: Processed Frame " << msg->header.frame_id << " with stamp " << stamp << " in " <<  duration << " ms" << endl;
+
+	// if (params.verbose)
+	// {
+	// 	for (size_t i = 0; i < min(t.size() - 1, clock_str.size()); i++)
+	// 	{
+	// 		double duration = 1000 * (t[i + 1] - t[i]);
+	// 		cout << clock_str[i] << duration << " ms" << endl;
+	// 	}
+	// 	cout << endl << "***********************" << endl << endl;
+	// }
+
+	return;
+}
+
 
 //void PointMapSLAM::update_transforms(const tf::tfMessage::ConstPtr& msg)
 //{
@@ -890,6 +1428,10 @@ int main(int argc, char **argv)
 	SLAM_params slam_params;
 
 	// TODO: Load params values
+	if (!private_nh.getParam("n_threads", slam_params.n_threads))
+	{
+		ROS_WARN("Warning: Cannot read n_threads");
+	}
 	if (!private_nh.getParam("map_voxel_size", slam_params.map_voxel_size))
 	{
 		ROS_WARN("Warning: Cannot read map_voxel_size");
@@ -985,7 +1527,7 @@ int main(int argc, char **argv)
 		ROS_WARN("Warning: Cannot read gt_classify");
 	}
 
-	// Update motion distorsion in ICP params
+	// Update motion distortion in ICP params
 	slam_params.icp_params.motion_distortion = slam_params.motion_distortion;
 
 	// Get log path
@@ -997,11 +1539,13 @@ int main(int argc, char **argv)
 	string start_time;
 	if (!nh.getParam("start_time", start_time))
 	{
-		slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/tmp/";
+		slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/Myhal/";
+		// slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/tmp/";
 	}
 	else
 	{
-		slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/";
+		slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/utias/";
+		// slam_params.log_path = "/home/" + user_name + "/1-Deep-Collider/results/runs/";
 		slam_params.log_path += start_time + "/logs-" + start_time + "/";
 	}
 
@@ -1057,24 +1601,34 @@ int main(int argc, char **argv)
 		ROS_WARN_STREAM("Loading :" << init_path);
 		load_cloud_normals(init_path, init_pts, init_normals, init_scores, float_scalar_name, counts, int_scalar_name);
 	}
+	ROS_WARN_STREAM("Loading map: OK");
 
 	///////////////////////
 	// Init mapper class //
 	///////////////////////
 
 	// Create a the SLAM class
+	ROS_WARN_STREAM("Building map ...");
 	PointMapSLAM mapper(slam_params, init_pts, init_normals, init_scores);
+	ROS_WARN_STREAM("Building map: OK");
 
 	mapper.sst = nh.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
 	mapper.sstm = nh.advertise<nav_msgs::MapMetaData>("map_metadata", 1, true);
+	
 
 	///////////////////////
 	// Start subscribing //
 	///////////////////////
 
 	// Dummy subscriber added by Hugues for debugging
-	string visu_topic = "/collision_visu";
-	ros::Subscriber visu_sub = nh.subscribe(visu_topic, 1, dummy_callback); 
+	string visu_topic = "/static_visu";
+	string visu_topic2 = "/dynamic_visu";
+	ros::Subscriber visu_sub = nh.subscribe(visu_topic, 1, dummy_callback);
+	ros::Subscriber visu_sub2 = nh.subscribe(visu_topic2, 1, dummy_callback);
+	// ros::Subscriber visu_sub2 = nh.subscribe("/plan_costmap_3D", 1, dummy_callback_3);
+	// ros::Subscriber visu_sub3 = nh.subscribe("/move_base/TebLocalPlannerROS/obstacles", 1, dummy_callback_4);
+
+	
 
 	// Subscribe to the lidar topic and the transforms topic
 	//ros::Subscriber tf_sub = nh.subscribe("tf", 1000, mapper.update_transforms);
@@ -1086,8 +1640,8 @@ int main(int argc, char **argv)
 	{
 		// 1. Using the prediction form the collider
 		ROS_WARN_STREAM("PointSlam in Collider mode: subscribing to " << pred_topic << " and " << velo_topic);
-		ros::Subscriber pred_sub = nh.subscribe(pred_topic, 1, &PointMapSLAM::gotCloud, &mapper);
-		ros::Subscriber lidar_sub = nh.subscribe(velo_topic, 1, &PointMapSLAM::gotLocCloud, &mapper);
+		ros::Subscriber pred_sub = nh.subscribe(pred_topic, 1, &PointMapSLAM::gotClassifCloud, &mapper);
+		ros::Subscriber lidar_sub = nh.subscribe(velo_topic, 1, &PointMapSLAM::gotVeloCloud, &mapper);
 		ros::spin();
 
 	}
@@ -1095,8 +1649,8 @@ int main(int argc, char **argv)
 	{
 		// 3. Using raw point clouds
 		ROS_WARN_STREAM("PointSlam in normal mode: subscribing to " << velo_topic);
-		ros::Subscriber pred_sub = nh.subscribe(pred_topic, 1, dummy_callback);
-		ros::Subscriber lidar_sub = nh.subscribe(velo_topic, 1, &PointMapSLAM::gotCloud, &mapper);
+		ros::Subscriber pred_sub = nh.subscribe(pred_topic, 1, dummy_callback_2);
+		ros::Subscriber lidar_sub = nh.subscribe(velo_topic, 1, &PointMapSLAM::gotVeloCloud, &mapper);
 		ros::spin();
 	}
 

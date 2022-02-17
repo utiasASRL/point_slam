@@ -39,44 +39,6 @@ void regu_pose_cycle(vector<Eigen::Matrix4d>& H, vector<float>& H_w)
 }
 
 
-Eigen::Matrix4d pose_interp(float t, Eigen::Matrix4d const& H1, Eigen::Matrix4d const& H2, int verbose)
-{
-	// Assumes 0 < t < 1
-	Eigen::Matrix3d R1 = H1.block(0, 0, 3, 3);
-	Eigen::Matrix3d R2 = H2.block(0, 0, 3, 3);
-
-	// Rotations to quaternions
-	Eigen::Quaternion<double> rot1(R1);
-	Eigen::Quaternion<double> rot2(R2);
-	Eigen::Quaternion<double> rot3 = rot1.slerp(t, rot2);
-
-	// ------------------ ICI ----------------------
-
-	if (verbose > 0)
-	{
-		cout << R2.determinant() << endl;
-		cout << R2 << endl;
-		cout << "[" << rot1.x() << " " << rot1.y() << " " << rot1.z() << " " << rot1.w() << "] -> ";
-		cout << "[" << rot2.x() << " " << rot2.y() << " " << rot2.z() << " " << rot2.w() << "] / " << t << endl;
-		cout << "[" << rot3.x() << " " << rot3.y() << " " << rot3.z() << " " << rot3.w() << "]" << endl;
-		cout << rot2.toRotationMatrix() << endl;
-		cout << rot3.toRotationMatrix() << endl;
-	}
-
-	// Translations to vectors
-	Eigen::Vector3d trans1 = H1.block(0, 3, 3, 1);
-	Eigen::Vector3d trans2 = H2.block(0, 3, 3, 1);
-
-	// Interpolation (not the real geodesic path, but good enough)
-	Eigen::Affine3d result;
-	result.translation() = (1.0 - t) * trans1 + t * trans2;
-	result.linear() = rot1.slerp(t, rot2).normalized().toRotationMatrix();
-
-	return result.matrix();
-}
-
-
-
 // Minimizer
 // *********
 
@@ -138,13 +100,14 @@ void SolvePoint2PlaneLinearSystem(const Matrix6d& A, const Vector6d& b, Vector6d
 	}
 }
 
-
-void PointToPlaneErrorMinimizer(vector<PointXYZ>& targets,
-	vector<PointXYZ>& references,
-	vector<PointXYZ>& refNormals,
-	vector<float>& weights,
-	vector<pair<size_t, size_t>>& sample_inds,
-	Eigen::Matrix4d& mOut)
+void PointToPlaneErrorMinimizer(vector<PointXYZ> &targets,
+								vector<PointXYZ> &references,
+								vector<PointXYZ> &refNormals,
+								vector<float> &weights,
+								vector<pair<size_t, size_t>> &sample_inds,
+								Eigen::Matrix4d &mOut,
+								vector<bool> &is_ground,
+								double ground_z)
 {
 	// See: "Linear Least-Squares Optimization for Point-to-Plane ICP Surface Registration" (Kok-Lim Low)
 	// init A and b matrice
@@ -156,6 +119,7 @@ void PointToPlaneErrorMinimizer(vector<PointXYZ>& targets,
 	// Fill matrices values
 	bool tgt_weights = weights.size() == targets.size();
 	bool ref_weights = weights.size() == references.size();
+	bool force_flat_ground = is_ground.size() == sample_inds.size();
 	int i = 0;
 	for (const auto& ind : sample_inds)
 	{
@@ -167,12 +131,28 @@ void PointToPlaneErrorMinimizer(vector<PointXYZ>& targets,
 		// Reference point
 		double dx = (double)references[ind.second].x;
 		double dy = (double)references[ind.second].y;
-		double dz = (double)references[ind.second].z;
+		double dz;
 
 		// Reference point normal
-		double nx = (double)refNormals[ind.second].x;
-		double ny = (double)refNormals[ind.second].y;
-		double nz = (double)refNormals[ind.second].z;
+		double nx;
+		double ny;
+		double nz;
+
+		// Special case to force a flat ground
+		if (force_flat_ground && is_ground[i])
+		{
+			dz = ground_z;
+			nx = 0;
+			ny = 0;
+			nz = 1;
+		}
+		else
+		{
+			dz = (double)references[ind.second].z;
+			nz = (double)refNormals[ind.second].z;
+			nx = (double)refNormals[ind.second].x;
+			ny = (double)refNormals[ind.second].y;
+		}
 
 		// setup least squares system
 		A(i, 0) = nz * sy - ny * sz;
@@ -229,32 +209,26 @@ void PointToPlaneErrorMinimizer(vector<PointXYZ>& targets,
 // ICP functions
 // *************
 
+
+
+
+
+
 void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
-	vector<float>& tgt_w,
+	vector<double>& tgt_w,
 	PointMap& map,
 	ICP_params& params,
 	ICP_results& results)
 {
 	// Parameters
 	// **********
+
 	size_t N = tgt_pts.size();
 	float max_pair_d2 = params.max_pairing_dist * params.max_pairing_dist;
-	float max_planar_d = params.max_planar_dist;
-	size_t first_steps = params.avg_steps / 2 + 1;
+	size_t first_steps = 2;
 
-	// Get angles phi of each points for motion distorsion
-	// vector<float> phis;
-	// float phi1 = 0;
-	// if (params.motion_distortion)
-	// {
-	// 	phis.reserve(tgt_pts.size());
-	// 	for (auto& p : tgt_pts)
-	// 	{
-	// 		phis.push_back(fmod(3 * M_PI / 2 - atan2(p.y, p.x), 2 * M_PI));
-	// 		if (phis.back() > phi1)
-	// 			phi1 = phis.back();
-	// 	}
-	// }
+	// Initially use a large associating dist (we change that during the interations)
+	float max_planar_d = 4 * params.max_planar_dist;
 
 	// Create search parameters
 	nanoflann::SearchParams search_params;
@@ -295,7 +269,8 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 	}
 
 	// Random generator
-	default_random_engine generator;
+  	unsigned seed = chrono::system_clock::now().time_since_epoch().count();
+	default_random_engine generator(seed);
 	discrete_distribution<int> distribution(tgt_w.begin(), tgt_w.end());
 
 	// Init result containers
@@ -339,15 +314,43 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 		vector<pair<size_t, size_t>> sample_inds;
 		if (params.n_samples < N)
 		{
+			// Random picking
 			unordered_set<size_t> unique_inds;
-			while (unique_inds.size() < params.n_samples)
-				unique_inds.insert((size_t)distribution(generator));
+			int count_tries = 0;
+			while (unique_inds.size() < params.n_samples && count_tries < (int)params.n_samples * 10)
+			{
+				// Be sure to ignore points that are considered outliers
+				size_t picked = (size_t)distribution(generator);
+				if (tgt_w[picked] > 0.05)
+					unique_inds.insert(picked);
+				count_tries++;
+			}
+
+			// Debugging if we could not pick enough indices
+			if (unique_inds.size() < params.n_samples)
+			{
+				for (int iiii = 0; iiii < (int)tgt_w.size(); iiii++)
+				{
+					if (tgt_w[iiii] > 20.5 || tgt_w[iiii] < 0.3)
+					cout << "tgt_w: " << iiii << " -> " << tgt_w[iiii] << endl;
+				}
+				count_tries = 0;
+				while (unique_inds.size() < params.n_samples && count_tries < (int)params.n_samples)
+				{
+					size_t picked_ind = (size_t)distribution(generator);
+					unique_inds.insert(picked_ind);
+					count_tries++;
+					cout << count_tries << ": " << picked_ind << " -> " << unique_inds.size() << "/" << params.n_samples << endl;
+				}
+				throw std::invalid_argument( "Impossible to pick enough icp samples" );
+			}
 
 			sample_inds = vector<pair<size_t, size_t>>(params.n_samples);
 			size_t i = 0;
 			for (const auto& ind : unique_inds)
 			{
 				sample_inds[i].first = ind;
+				// chosen_inds[ind] = 1.0f;
 				i++;
 			}
 		}
@@ -382,6 +385,11 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 		// Distances metrics //
 		///////////////////////
 
+		// Update association distance after a few iterations
+		if (step == first_steps)
+			max_planar_d = params.max_planar_dist;
+
+
 		// Erase sample_inds if dists is too big
 		vector<pair<size_t, size_t>> filtered_sample_inds;
 		filtered_sample_inds.reserve(sample_inds.size());
@@ -394,7 +402,7 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 				// Check planar distance (only after a few steps for initial alignment)
 				PointXYZ diff = (map.cloud.pts[sample_inds[i].second] - aligned[sample_inds[i].first]);
 				float planar_dist = abs(diff.dot(map.normals[sample_inds[i].second]));
-				if (step < first_steps || planar_dist < max_planar_d)
+				if (planar_dist < max_planar_d)
 				{
 					// Keep samples
 					filtered_sample_inds.push_back(sample_inds[i]);
@@ -408,6 +416,7 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 
 			}
 		}
+
 		// Compute RMS
 		results.all_rms.push_back(sqrt(rms2 / (float)filtered_sample_inds.size()));
 		results.all_plane_rms.push_back(sqrt(prms2 / (float)filtered_sample_inds.size()));
@@ -420,13 +429,27 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 		//////////////////
 
 		// Minimize error
-		PointToPlaneErrorMinimizer(aligned, map.cloud.pts, map.normals, map.scores, filtered_sample_inds, H_icp);
+		vector<bool> is_ground;
+		if (params.ground_w > 0)
+		{
+			is_ground.reserve(filtered_sample_inds.size());
+			for (size_t i = 0; i < filtered_sample_inds.size(); i++)
+				is_ground.push_back(tgt_w[filtered_sample_inds[i].first] > params.ground_w);
+		}
+		PointToPlaneErrorMinimizer(aligned,
+								   map.cloud.pts,
+								   map.normals,
+								   map.scores,
+								   filtered_sample_inds,
+								   H_icp,
+								   is_ground,
+								   params.ground_z);
 
 		t[4] = std::clock();
 
 
 		//////////////////////////////////////
-		// Alignment with Motion distorsion //
+		// Alignment with Motion distortion //
 		//////////////////////////////////////
 
 		// Apply the incremental transformation found by ICP
@@ -509,7 +532,7 @@ void PointToMapICP(vector<PointXYZ>& tgt_pts, vector<float>& tgt_t,
 				max_it = step + params.avg_steps;
 
 				// For these last steps, reduce the max distance (half of wall thickness)
-				max_planar_d = 0.08;
+				max_planar_d = params.max_planar_dist / 2;
 			}
 		}
 

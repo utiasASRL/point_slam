@@ -1,16 +1,14 @@
 #pragma once
 
-
-
 #include <set>
 #include <cstdint>
 #include <cmath>
 #include <algorithm>
+#include <unordered_set>
 #include <limits>
 
-#include "../cloud/cloud.h"
-
-#include "../../include/nanoflann/nanoflann.hpp"
+#include "../grid_subsampling/grid_subsampling.h"
+#include "../polar_processing/polar_processing.h"
 
 using namespace std;
 
@@ -18,6 +16,8 @@ using namespace std;
 typedef nanoflann::KDTreeSingleIndexAdaptorParams KDTree_Params;
 typedef nanoflann::KDTreeSingleIndexAdaptor<nanoflann::L2_Simple_Adaptor<float, PointCloud>, PointCloud, 3> PointXYZ_KDTree;
 typedef nanoflann::KDTreeSingleIndexDynamicAdaptor<nanoflann::L2_Simple_Adaptor<float, PointCloud>, PointCloud, 3> PointXYZ_Dynamic_KDTree;
+
+Eigen::Matrix4d pose_interp(float t, Eigen::Matrix4d const &H1, Eigen::Matrix4d const &H2, int verbose);
 
 //-------------------------------------------------------------------------------------------
 //
@@ -135,148 +135,21 @@ public:
 	}
 
 	// Methods
-	void update(vector<PointXYZ>& points0, vector<PointXYZ>& normals0, vector<float>& scores0);
+	void update(vector<PointXYZ> &points0, vector<PointXYZ> &normals0, vector<float> &scores0);
 
 	void init_samples(const PointXYZ originCorner,
 					  const PointXYZ maxCorner,
-					  unordered_map<size_t, MapVoxelData>& samples);
+					  unordered_map<size_t, MapVoxelData> &samples);
 
-	void add_samples(const vector<PointXYZ>& points0,
-					 const vector<PointXYZ>& normals0,
-					 const vector<float>& scores0,
+	void add_samples(const vector<PointXYZ> &points0,
+					 const vector<PointXYZ> &normals0,
+					 const vector<float> &scores0,
 					 const PointXYZ originCorner,
 					 const PointXYZ maxCorner,
-					 unordered_map<size_t, MapVoxelData>& samples);
+					 unordered_map<size_t, MapVoxelData> &samples);
 
 	size_t size() { return points.size(); }
 };
-
-//-------------------------------------------------------------------------------------------
-//
-// VoxKey
-// ******
-//
-//	Here we define a struct that will be used as key in our hash map. It contains 3 integers.
-//  Then we specialize the std::hash function for this class.
-//
-//-------------------------------------------------------------------------------------------
-
-class VoxKey
-{
-public:
-	int x;
-	int y;
-	int z;
-
-	VoxKey()
-	{
-		x = 0;
-		y = 0;
-		z = 0;
-	}
-	VoxKey(int x0, int y0, int z0)
-	{
-		x = x0;
-		y = y0;
-		z = z0;
-	}
-
-	bool operator==(const VoxKey& other) const
-	{
-		return (x == other.x && y == other.y && z == other.z);
-	}
-};
-
-inline VoxKey operator+(const VoxKey A, const VoxKey B)
-{
-	return VoxKey(A.x + B.x, A.y + B.y, A.z + B.z);
-}
-
-inline VoxKey operator-(const VoxKey A, const VoxKey B)
-{
-	return VoxKey(A.x - B.x, A.y - B.y, A.z - B.z);
-}
-
-// Simple utility function to combine hashtables
-template <typename T, typename... Rest>
-void hash_combine(std::size_t& seed, const T& v, const Rest& ... rest)
-{
-	seed ^= std::hash<T>{}(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-	(hash_combine(seed, rest), ...);
-}
-
-// Specialization of std:hash function
-namespace std
-{
-	template <>
-	struct hash<VoxKey>
-	{
-		std::size_t operator()(const VoxKey& k) const
-		{
-			std::size_t ret = 0;
-			hash_combine(ret, k.x, k.y, k.z);
-			return ret;
-		}
-	};
-} // namespace std
-
-
-//-------------------------------------------------------------------------------------------
-//
-// PixKey
-// ******
-//
-//	Same as VoxKey but in 2D
-//
-//-------------------------------------------------------------------------------------------
-
-class PixKey
-{
-public:
-	int x;
-	int y;
-
-	PixKey()
-	{
-		x = 0;
-		y = 0;
-	}
-	PixKey(int x0, int y0)
-	{
-		x = x0;
-		y = y0;
-	}
-
-	bool operator==(const PixKey& other) const
-	{
-		return (x == other.x && y == other.y);
-	}
-};
-
-inline PixKey operator+(const PixKey A, const PixKey B)
-{
-	return PixKey(A.x + B.x, A.y + B.y);
-}
-
-inline PixKey operator-(const PixKey A, const PixKey B)
-{
-	return PixKey(A.x - B.x, A.y - B.y);
-}
-
-// Specialization of std:hash function
-namespace std
-{
-	template <>
-	struct hash<PixKey>
-	{
-		std::size_t operator()(const PixKey& k) const
-		{
-			std::size_t ret = 0;
-			hash_combine(ret, k.x, k.y);
-			return ret;
-		}
-	};
-} // namespace std
 
 
 //-------------------------------------------------------------------------------------------
@@ -309,6 +182,7 @@ public:
 	vector<PointXYZ> normals;
 	vector<float> scores;
 	vector<int> counts;
+	vector<int> latest;
 
 	// Sparse hashmap that contain voxels (each voxel data is in the contiguous vector containers)
 	unordered_map<VoxKey, size_t> samples;
@@ -331,9 +205,9 @@ public:
 		update_idx = 0;
 	}
 	PointMap(const float dl0,
-			 vector<PointXYZ>& init_points,
-			 vector<PointXYZ>& init_normals,
-			 vector<float>& init_scores) : tree(3, cloud, KDTree_Params(10 /* max leaf */))
+			 vector<PointXYZ> &init_points,
+			 vector<PointXYZ> &init_normals,
+			 vector<float> &init_scores) : tree(3, cloud, KDTree_Params(10 /* max leaf */))
 	{
 		// Set voxel size
 		dl = dl0;
@@ -351,15 +225,42 @@ public:
 		if (init_points.size() > 0)
 		{
 			update_idx = -1;
-			update(init_points, init_normals, init_scores);
+			update(init_points, init_normals, init_scores, -1);
 		}
+	}
+	
+	PointMap(const PointMap &map0) : tree(3, cloud, KDTree_Params(10 /* max leaf */))
+	{
+		dl = map0.dl;
+		update_idx = map0.update_idx;
+		cloud = map0.cloud;
+		normals = map0.normals;
+		scores = map0.scores;
+		counts = map0.counts;
+		latest = map0.latest;
+		samples = map0.samples;
+		tree.addPoints(0, cloud.pts.size() - 1);
+	}
+
+	PointMap& operator=(const PointMap &map0)
+	{
+		dl = map0.dl;
+		update_idx = map0.update_idx;
+		cloud = map0.cloud;
+		normals = map0.normals;
+		scores = map0.scores;
+		counts = map0.counts;
+		latest = map0.latest;
+		samples = map0.samples;
+		tree.addPoints(0, cloud.pts.size() - 1);
+      	return *this;
 	}
 
 	// Size of the map (number of point/voxel in the map)
 	size_t size() { return cloud.pts.size(); }
 
 	// Init of voxel centroid
-	void init_sample(const VoxKey& k, const PointXYZ& p0, const PointXYZ& n0, const float& s0 , const int& c0)
+	void init_sample(const VoxKey &k, const PointXYZ &p0, const PointXYZ &n0, const float &s0, const int &c0)
 	{
 		// We place anew key in the hashmap
 		samples.emplace(k, cloud.pts.size());
@@ -368,16 +269,33 @@ public:
 		cloud.pts.push_back(p0);
 		normals.push_back(n0);
 		scores.push_back(s0);
-		
+
 		// Count is useless, instead save index of first frame placing a point in this cell
 		counts.push_back(c0);
+		latest.push_back(c0);
+	}
+
+	// Init of voxel centroid
+	void reinit_sample(const VoxKey &k, const PointXYZ &p0, const PointXYZ &n0, const float &s0, const int &c0)
+	{
+		// We place anew key in the hashmap
+		samples[k], cloud.pts.size();
+
+		// We add new voxel data but initiate only the centroid
+		cloud.pts.push_back(p0);
+		normals.push_back(n0);
+		scores.push_back(s0);
+
+		// Count is useless, instead save index of first frame placing a point in this cell
+		counts.push_back(c0);
+		latest.push_back(c0);
 	}
 
 	// Update of voxel centroid
-	void update_sample(const size_t idx, const PointXYZ& p0, const PointXYZ& n0, const float& s0)
+	void update_sample(const size_t idx, const PointXYZ &p0, const PointXYZ &n0, const float &s0, const int &c0)
 	{
-		// Update count for optional removal count of points (USELESS see init_sample)
-		//counts[idx] += 1;
+		// latest frame idx
+		latest[idx] = c0;
 
 		// Update normal if we have a clear view of it  and closer distance (see computation of score)
 		if (s0 > scores[idx])
@@ -387,7 +305,7 @@ public:
 		}
 	}
 
-	void update_limits(const VoxKey& k)
+	void update_limits(const VoxKey &k)
 	{
 		if (k.x < minVox.x)
 			minVox.x = k.x;
@@ -405,7 +323,7 @@ public:
 	}
 
 	// Update map with a set of new points
-	void update(vector<PointXYZ>& points0, vector<PointXYZ>& normals0, vector<float>& scores0)
+	void update(vector<PointXYZ> &points0, vector<PointXYZ> &normals0, vector<float> &scores0, int ind0)
 	{
 
 		// Reserve new space if needed
@@ -415,6 +333,7 @@ public:
 		{
 			cloud.pts.reserve(cloud.pts.capacity() + points0.size());
 			counts.reserve(counts.capacity() + points0.size());
+			latest.reserve(latest.capacity() + points0.size());
 			normals.reserve(normals.capacity() + points0.size());
 			scores.reserve(scores.capacity() + points0.size());
 		}
@@ -432,7 +351,7 @@ public:
 		VoxKey k0;
 		size_t num_added = 0;
 
-		for (auto& p : points0)
+		for (auto &p : points0)
 		{
 			// Position of point in sample map
 			PointXYZ p_pos = p * inv_dl;
@@ -445,36 +364,63 @@ public:
 			// Update the point count
 			if (samples.count(k0) < 1)
 			{
-				// Create a new sample at this location
-				init_sample(k0, p, normals0[i], scores0[i], update_idx);
+				init_sample(k0, p, normals0[i], scores0[i], ind0);
 				num_added++;
-
-				// Update grid limits
-				update_limits(k0);
 			}
 			else
-				update_sample(samples[k0], p, normals0[i], scores0[i]);
+			{
+				// Case of previously deleted points
+				size_t idx = samples[k0];
+				if (tree.isRemoved(idx))
+				{
+					// We want to add previously deleted points, we have to recreate it from scratch
+					reinit_sample(k0, p, normals0[i], scores0[i], ind0);
+					num_added++;
+				}
+				else
+					update_sample(idx, p, normals0[i], scores0[i], ind0);
+			}
 			i++;
 		}
 
 		// Update tree
 		tree.addPoints(cloud.pts.size() - num_added, cloud.pts.size() - 1);
-		
+
 		// Update frame count
 		update_idx++;
-		
 	}
 
-	// Debug method that saves the map as ply file
-	void debug_save_ply(string& path, int idx)
+	
+	// Remove old indices from tree
+	int remove_old(int min_i, int last_min_i)
 	{
-		cout << endl << "---------------------------------------------" << endl;
+		int removed_count = 0;
+		int i = 0;
+		for (auto &latest_i: latest)
+		{
+			if (latest_i < min_i && latest_i >= last_min_i)
+			{
+				tree.removePoint(i);
+				removed_count++;
+			}
+			i++;
+		}
+		return removed_count;
+	}
+
+
+	// Debug method that saves the map as ply file
+	void debug_save_ply(string &path, int idx)
+	{
+		cout << endl
+			 << "---------------------------------------------" << endl;
 		char buffer[200];
 		sprintf(buffer, "pointmap_%05d.ply", (int)idx);
 		string filepath = path + string(buffer);
 		cout << filepath << endl;
 		save_cloud(filepath, cloud.pts, normals, scores);
-		cout << "---------------------------------------------" << endl << endl;
+		cout << "---------------------------------------------" << endl
+			 << endl;
 	}
 };
 
@@ -496,7 +442,7 @@ public:
 
 	vector<float> scores;
 	vector<int> counts;
-	vector<PointXY> points;
+	vector<PointXYZ> points;
 
 	// Sparse hashmap that contain voxels (each voxel data is in the contiguous vector containers)
 	unordered_map<PixKey, size_t> samples;
@@ -520,7 +466,7 @@ public:
 	size_t size() { return points.size(); }
 
 	// Init of pixel centroid
-	void init_sample(const PixKey& k, const PointXY& p0, const float& s0)
+	void init_sample(const PixKey &k, const PointXYZ &p0, const float &s0)
 	{
 		// We place anew key in the hashmap
 		samples.emplace(k, points.size());
@@ -532,17 +478,21 @@ public:
 	}
 
 	// Update of voxel centroid
-	void update_sample(const size_t idx, const float& s0)
+	void update_sample(const size_t idx, const float &s0)
 	{
 		// Update only count for optional removal count of points and centroid of the cell
 		if (counts[idx] < max_count)
 			scores[idx] += (s0 - scores[idx]) / ++counts[idx];
 		else
 			scores[idx] += (s0 - scores[idx]) / max_count;
-		
 	}
 
-	void update_limits(const PixKey& k)
+	void update_height(const size_t idx, const float &h0)
+	{
+		points[idx].z += (h0 - points[idx].z) / 4;
+	}
+
+	void update_limits(const PixKey &k)
 	{
 		if (k.x < minPix.x)
 			minPix.x = k.x;
@@ -556,7 +506,7 @@ public:
 	}
 
 	// Update map with a set of new points
-	void init_from_3D_map(vector<PointXYZ>& points3D, Plane3D& ground_P, float zMin, float zMax)
+	void init_from_3D_map(vector<PointXYZ> &points3D, Plane3D &ground_P, float zMin, float zMax)
 	{
 		////////////////
 		// Init steps //
@@ -580,15 +530,15 @@ public:
 
 		// Loop over 3D points
 		size_t p_i = 0;
-		for (auto& p : points3D)
+		for (auto &p : points3D)
 		{
 			// Check height limits
-			if (distances[p_i] < zMin || distances[p_i] > zMax)
+			if (distances[p_i] < zMin*3 || distances[p_i] > zMax)
 			{
 				p_i++;
 				continue;
 			}
-			
+
 			// Corresponding key
 			k0.x = (int)floor(p.x * inv_dl);
 			k0.y = (int)floor(p.y * inv_dl);
@@ -597,7 +547,7 @@ public:
 			if (samples.count(k0) < 1)
 			{
 				// Create a new sample at this location
-				init_sample(k0, PointXY(((float)k0.x + 0.5) * dl, ((float)k0.y + 0.5) * dl), 1.0);
+				init_sample(k0, PointXYZ(((float)k0.x + 0.5) * dl, ((float)k0.y + 0.5) * dl, p.z), 1.0);
 
 				// Update grid limits
 				update_limits(k0);
@@ -605,21 +555,29 @@ public:
 
 			p_i++;
 		}
-		
 	}
 
 	// Update map with a set of new points
-	void update_from_3D(vector<PointXYZ>& points3D, PointXYZ& center3D, Plane3D& ground_P, float zMin, float zMax)
+	void update_from_3D(vector<PointXYZ> &points3D, vector<int> &rings, size_t n_rings, PointXYZ &center3D, float zMin, float zMax)
 	{
 		////////////////
 		// Init steps //
 		////////////////
 
+		// std::cout << "------------------------------------" << std::endl;
+		// std::cout << zMin << std::endl;
+		// std::cout << zMax << std::endl;
 
-		// TODO: Every once and a while delete the pixels that have a low score (<0.1). 
+		// std::cout << min_point(points3D).z << std::endl;
+		// std::cout << max_point(points3D).z << std::endl;
+
+		// std::cout << center3D.z << std::endl;
+		// std::cout << center3D.z << std::endl;
+		// std::cout << "********" << std::endl;
+
+		// TODO: Every once and a while delete the pixels that have a low score (<0.1).
 		// 		 Just create again the samples, vectors etc.
 		//
-
 
 		// Reserve new space if needed
 		if (points.size() < 1)
@@ -643,64 +601,102 @@ public:
 
 		// Init free range table (1D grid containing range for each angle)
 		float angle_res = 0.5 * M_PI / 180.0;
+		float inv_angle_res = 1 / angle_res;
 		size_t n_angles = (size_t)floor(2.0 * M_PI / angle_res) + 1;
 		vector<float> range_table(n_angles, -1.0);
-
-		// Get distances to ground
-		vector<float> distances;
-		ground_P.point_distances(points3D, distances);
-
 		
+		// map theta to ring index
+		float theta_res = 0.33 * M_PI / 180.0;
+		float inv_theta_res = 1 / theta_res;
+		size_t n_thetas = (size_t)floor( M_PI / theta_res) + 1;
+		vector<float> range_low_table(n_angles * n_rings, -1.0);
+		vector<int> theta_to_ring(n_thetas, -1);
+
+		// // Get distances to ground
+		// vector<float> heights;
+		// ground_P.point_distances(points3D, heights);
+
 		////////////////////////
 		// Update full pixels //
 		////////////////////////
 
 		// Loop over 3D points
+		float pi_s_2 = M_PI / 2;
 		size_t p_i = 0;
-		for (auto& p : points3D)
+		for (auto &p : points3D)
 		{
 			// Check height limits
-			if (distances[p_i] < zMin || distances[p_i] > zMax)
+			if (p.z > zMin && p.z < zMax)
 			{
-				p_i++;
-				continue;
-			}
-			
-			// Corresponding key
-			k0.x = (int)floor(p.x * inv_dl);
-			k0.y = (int)floor(p.y * inv_dl);
+				// Corresponding key
+				k0.x = (int)floor(p.x * inv_dl);
+				k0.y = (int)floor(p.y * inv_dl);
 
-			// Update the point count
-			if (samples.count(k0) < 1)
-			{
-				// Create a new sample at this location
-				init_sample(k0, PointXY(((float)k0.x + 0.5) * dl, ((float)k0.y + 0.5) * dl), 1.0);
-
-				// Update grid limits
-				update_limits(k0);
-			}
-			else 
-			{
-				size_t i0 = samples[k0];
-				if (i0 < not_updated.size() && not_updated[i0])
+				// Update the point count
+				if (samples.count(k0) < 1)
 				{
-					update_sample(i0, 1.0);
-					not_updated[i0] = false;
-				}
-			}
+					// Create a new sample at this location
+					init_sample(k0, PointXYZ(((float)k0.x + 0.5) * dl, ((float)k0.y + 0.5) * dl, p.z), 0.9);
 
-			// Add the angle and its corresponding free_range
-			PointXY diff2D(p - center3D);
-			size_t angle_idx = (size_t)floor((atan2(diff2D.y, diff2D.x) + M_PI) / angle_res);
-			float d2 = diff2D.sq_norm();
-			if (range_table[angle_idx] < 0 || d2 < pow(range_table[angle_idx], 2))
-				range_table[angle_idx] = sqrt(d2);
+					// Update grid limits
+					update_limits(k0);
+				}
+				else
+				{
+					size_t i0 = samples[k0];
+					if (i0 < not_updated.size() && not_updated[i0])
+					{
+						update_sample(i0, 1.0);
+						update_height(i0, p.z);
+						not_updated[i0] = false;
+					}
+				}
+
+				// Add the angle and its corresponding free_range
+				PointXY diff2D(p - center3D);
+				size_t angle_idx = (size_t)floor((atan2(diff2D.y, diff2D.x) + M_PI) * inv_angle_res);
+				float d2 = diff2D.sq_norm();
+				if (range_table[angle_idx] < 0 || d2 < pow(range_table[angle_idx], 2))
+					range_table[angle_idx] = sqrt(d2);
+			}
+			else
+			{
+				// Save as low heigh free range
+				// Add the angle and its corresponding free_range
+				PointXYZ diff3D(p - center3D);
+				float tmp1 = diff3D.x * diff3D.x + diff3D.y * diff3D.y;
+				float d2 = tmp1 + diff3D.z * diff3D.z;
+				float phi = atan2(diff3D.y, diff3D.x); // azimuth angle
+				float theta = atan2(diff3D.z, sqrt(tmp1));
+				size_t phi_idx = (size_t)floor((phi + M_PI) * inv_angle_res);
+				int theta_idx = (int)floor((theta + pi_s_2) * inv_theta_res);
+
+				if (theta_to_ring[theta_idx] < 0)
+				{
+					// Update ring theta
+					theta_to_ring[theta_idx] = rings[p_i];
+				}
+
+				// Get index in the low range table
+				size_t angle_idx = phi_idx + n_angles * rings[p_i];
+				if (range_low_table[angle_idx] < 0 || d2 < range_low_table[angle_idx])
+					range_low_table[angle_idx] = d2;
+			}
 
 			p_i++;
 		}
-		
-		
-		
+
+		// Make sure that if an obstacle is above a ray, it gets deleted like if it was on the ray
+		// By setting the -1 theta_to_ring to the next lowest ring
+		int last_ring_i = -1;
+		for (int i = 0; i < (int)theta_to_ring.size(); i++)
+		{
+			if (theta_to_ring[i] >= 0)
+				last_ring_i = theta_to_ring[i];
+			else
+				theta_to_ring[i] = last_ring_i;
+		}
+
 		///////////////////////////////
 		// Interpolate the 2D ranges //
 		///////////////////////////////
@@ -734,7 +730,7 @@ public:
 								real_i += range_table.size();
 							float t = (i - last_i) / diff;
 							int real_last_i = last_i + range_table.size();
-							range_table[real_i] = t * range_table[real_last_i] + (1-t) * range_table[next_i];
+							range_table[real_i] = t * range_table[real_last_i] + (1 - t) * range_table[next_i];
 						}
 					}
 				}
@@ -746,7 +742,7 @@ public:
 						for (int i = last_i + 1; i < next_i; i++)
 						{
 							float t = (i - last_i) / diff;
-							range_table[i] = t * range_table[last_i] + (1-t) * range_table[next_i];
+							range_table[i] = t * range_table[last_i] + (1 - t) * range_table[next_i];
 						}
 					}
 				}
@@ -754,22 +750,23 @@ public:
 			}
 			next_i++;
 		}
-		
-	
+
 		////////////////////////
 		// Update free pixels //
 		////////////////////////
-		
+
 		// Apply margin to free ranges
 		float margin = dl;
-		for (auto& r: range_table)
+		for (auto &r : range_table)
 			r -= margin;
+		for (auto &r : range_low_table)
+			r -= pow(0.05, 2);
 
 		// Update free pixels
-		PointXY center2D(center3D);
 		float min_r2 = pow(0.1, 2);
+		float min_free_h = 0.3;
 		p_i = 0;
-		for (auto& p: points)
+		for (auto &p : points)
 		{
 			// Ignore points updated just now
 			if (p_i >= not_updated.size())
@@ -780,30 +777,64 @@ public:
 				continue;
 			}
 
-			// Compute angle and range
-			PointXY diff2D(p - center2D);
-			size_t angle_idx = (atan2(diff2D.y, diff2D.x) + M_PI) / angle_res;
-			float d2 = diff2D.sq_norm();
+			if (p.z > min_free_h)
+			{
+				// Compute angle and range
+				PointXY diff2D(p - center3D);
+				size_t angle_idx = (atan2(diff2D.y, diff2D.x) + M_PI) * inv_angle_res;
+				float d2 = diff2D.sq_norm();
 
-			// Update score
-			if (d2 > min_r2 && d2 < pow(range_table[angle_idx], 2))
-				update_sample(p_i, 0.0);
+				// Update score
+				if (d2 > min_r2 && d2 < pow(range_table[angle_idx], 2))
+				{
+					update_sample(p_i, 0.0);
+				}
+			}
+			else
+			{
+				// Low height case
+				PointXYZ diff3D(p - center3D);
+				float tmp1 = diff3D.x * diff3D.x + diff3D.y * diff3D.y;
+				float d2 = tmp1 + diff3D.z * diff3D.z;
+				float phi = atan2(diff3D.y, diff3D.x); // azimuth angle
+				float theta = atan2(diff3D.z, sqrt(tmp1));
+				size_t phi_idx = (size_t)floor((phi + M_PI) * inv_angle_res);
+				int theta_idx = (int)floor((theta + pi_s_2) * inv_theta_res);
+
+				// Update ring theta
+				int ring_i = theta_to_ring[theta_idx];
+				if (ring_i >= 0)
+				{
+					
+					// Get index in the low range table
+					size_t angle_idx = phi_idx + n_angles * ring_i;
+
+					// Update score
+					if (d2 > min_r2 && d2 < range_low_table[angle_idx] )
+					{
+						update_sample(p_i, 0.0);
+					}
+				}
+
+			}
+
 			p_i++;
 		}
 	}
 
 	// Debug method that saves the map as ply file
-	void debug_save_ply(string& path, int idx)
+	void debug_save_ply(string &path, int idx)
 	{
 		vector<PointXYZ> points3D;
 		points3D.reserve(points.size());
-		for (auto& p: points)
+		for (auto &p : points)
 			points3D.push_back(PointXYZ(p.x, p.y, 0));
 
-		cout << endl << "---------------------------------------------" << endl;
+		cout << endl
+			 << "---------------------------------------------" << endl;
 		vector<float> features(scores);
 		features.reserve(scores.size() * 2);
-		for (auto& c: counts)
+		for (auto &c : counts)
 			features.push_back((float)c);
 
 		char buffer[200];
@@ -811,6 +842,7 @@ public:
 		string filepath = path + string(buffer);
 		cout << filepath << endl;
 		save_cloud(filepath, points3D, features);
-		cout << "---------------------------------------------" << endl << endl;
+		cout << "---------------------------------------------" << endl
+			 << endl;
 	}
 };
