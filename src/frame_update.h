@@ -112,6 +112,7 @@ public:
 	int map2d_max_count;
 	float map2d_zMin, map2d_zMax;
 	string log_path;
+	bool publish_sub_pts;
 
 	// Methods
 	// *******
@@ -140,6 +141,7 @@ public:
 		base_frame = "base_link";
 		filtering = false;
 		gt_filter = true;
+		publish_sub_pts = true;
 		std::iota(loc_labels.begin(), loc_labels.end(), 0);
 		map2d_pixel_size = 0.08;
 		map2d_max_count = 10;
@@ -183,6 +185,7 @@ public:
 	tf::TransformBroadcaster tfBroadcaster;
 	ros::Publisher sst;
 	ros::Publisher sstm;
+	ros::Publisher sub_frame_pub;
 	OccupGrid2D map2D;
 
 	// Methods
@@ -221,6 +224,7 @@ public:
 	void processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map_2D = true);
 	void processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map_2D = true);
 	void publish_2D_map();
+	void publish_sub_frame(vector<PointXYZ> &pts0, ros::Time& stamp0);
 
 	// Debug method
 	void save_trajectory(string& path)

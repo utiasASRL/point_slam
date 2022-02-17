@@ -130,6 +130,62 @@ void PointMapSLAM::publish_2D_map()
 }
 
 
+void PointMapSLAM::publish_sub_frame(vector<PointXYZ> &pts0, ros::Time& stamp0)
+{
+
+  	const uint32_t POINT_STEP = 12;
+	sensor_msgs::PointCloud2 pt_message;
+	
+	// make sure to set the header information on the map
+	pt_message.header.stamp = stamp0;
+	pt_message.header.frame_id = tfListener.resolve(params.map_frame);
+	pt_message.header.seq = n_frames;
+
+	// Data size
+	pt_message.height = 1;
+	pt_message.width = pts0.size();
+
+	// PointField[] 
+	pt_message.fields.resize(4);
+	pt_message.fields[0].name = "x";
+	pt_message.fields[0].offset = 0;
+	pt_message.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
+	pt_message.fields[0].count = 1;
+
+	pt_message.fields[1].name = "y";
+	pt_message.fields[1].offset = 4;
+	pt_message.fields[1].datatype = sensor_msgs::PointField::FLOAT32;
+	pt_message.fields[1].count = 1;
+
+	pt_message.fields[2].name = "z";
+	pt_message.fields[2].offset = 8;
+	pt_message.fields[2].datatype = sensor_msgs::PointField::FLOAT32;
+	pt_message.fields[2].count = 1;
+
+	pt_message.data.resize(std::max((size_t)1, pts0.size()) * POINT_STEP, 0x00);
+
+	pt_message.point_step = POINT_STEP;
+	pt_message.row_step = pt_message.data.size();
+
+	pt_message.is_bigendian = false;
+	pt_message.is_dense = true;
+
+  	msg.data.resize(std::max((size_t)1, pts0.size()) * POINT_STEP, 0x00);
+	uint8_t *ptr = pt_message.data.data();
+	for (size_t i = 0; i < pts0.size(); i++)
+	{
+		*(reinterpret_cast<float*>(ptr + 0)) = pts0[i].x;
+		*(reinterpret_cast<float*>(ptr + 4)) = pts0[i].y;
+		*(reinterpret_cast<float*>(ptr + 8)) = pts0[i].z;
+		ptr += POINT_STEP;
+	}
+
+	// Publish map and map metadata
+	sub_frame_pub.publish(pt_message);
+}
+
+
+
 //-----------------------------------------------------------------------------------------------------------------------------
 // SLAM functions
 // **************
@@ -514,8 +570,6 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	vector<float> heights;
 	preprocess_frame(f_pts, f_ts, f_rings, sub_pts, normals, norm_scores, icp_scores, sub_inds, frame_ground, heights, params, t);
 	
-
-	
 	// Min and max times (dont loop on the whole frame as it is useless)
 	float loop_ratio = 0.01;
 	get_min_max_times(f_ts, t_min, t_max, loop_ratio);
@@ -526,8 +580,6 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		t0 = t_min - (t_max - t_min);
 	else
 		t0 = params.icp_params.last_time + (float)(latest_stamp.toSec() - stamp.toSec());
-
-
 
 	// Get the motion_distortion values from timestamps
 	// 0 for t0 (old t_min) and 1 for t_max
@@ -656,16 +708,16 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 	t.push_back(omp_get_wtime());
 
-	////////////////////
-	// Update the map //
-	////////////////////
+	////////////////////////////////
+	// Publish aligned sub points //
+	////////////////////////////////
 
 	// //debug deep copies
 	// vector<PointXYZ> sub_pts_dist = sub_pts;
 	// vector<PointXYZ> normals_dist = normals;
 	// vector<PointXYZ> f_pts_dist = f_pts;
 
-	if (update_map)
+	if (params.publish_sub_pts || update_map)
 	{
 		if (params.motion_distortion)
 		{
@@ -703,7 +755,16 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		}
 	}
 
+	if (params.publish_sub_pts)
+	{
+		publish_sub_frame(sub_pts, stamp);
+	}
+
 	t.push_back(omp_get_wtime());
+	
+	////////////////////
+	// Update the map //
+	////////////////////
 
 	if (update_map)
 	{
@@ -1526,6 +1587,10 @@ int main(int argc, char **argv)
 	{
 		ROS_WARN("Warning: Cannot read gt_classify");
 	}
+	if (!private_nh.getParam("publish_sub_pts", slam_params.publish_sub_pts))
+	{
+		ROS_WARN("Warning: Cannot read publish_sub_pts");
+	}
 
 	// Update motion distortion in ICP params
 	slam_params.icp_params.motion_distortion = slam_params.motion_distortion;
@@ -1614,6 +1679,7 @@ int main(int argc, char **argv)
 
 	mapper.sst = nh.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
 	mapper.sstm = nh.advertise<nav_msgs::MapMetaData>("map_metadata", 1, true);
+	mapper.sub_frame_pub = nh.advertise<sensor_msgs::PointCloud2>("sub_velo", 1, true);
 	
 
 	///////////////////////
