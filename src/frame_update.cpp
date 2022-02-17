@@ -146,7 +146,7 @@ void PointMapSLAM::publish_sub_frame(vector<PointXYZ> &pts0, ros::Time& stamp0)
 	pt_message.width = pts0.size();
 
 	// PointField[] 
-	pt_message.fields.resize(4);
+	pt_message.fields.resize(3);
 	pt_message.fields[0].name = "x";
 	pt_message.fields[0].offset = 0;
 	pt_message.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
@@ -170,7 +170,7 @@ void PointMapSLAM::publish_sub_frame(vector<PointXYZ> &pts0, ros::Time& stamp0)
 	pt_message.is_bigendian = false;
 	pt_message.is_dense = true;
 
-  	msg.data.resize(std::max((size_t)1, pts0.size()) * POINT_STEP, 0x00);
+  	pt_message.data.resize(std::max((size_t)1, pts0.size()) * POINT_STEP, 0x00);
 	uint8_t *ptr = pt_message.data.data();
 	for (size_t i = 0; i < pts0.size(); i++)
 	{
@@ -1679,7 +1679,7 @@ int main(int argc, char **argv)
 
 	mapper.sst = nh.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
 	mapper.sstm = nh.advertise<nav_msgs::MapMetaData>("map_metadata", 1, true);
-	mapper.sub_frame_pub = nh.advertise<sensor_msgs::PointCloud2>("sub_velo", 1, true);
+	mapper.sub_frame_pub = nh.advertise<sensor_msgs::PointCloud2>("sub_points", 1, true);
 	
 
 	///////////////////////
