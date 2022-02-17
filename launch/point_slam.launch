@@ -5,6 +5,7 @@
   <arg name="map_frame" default="map" />
   <arg name="filter" default="false" />
   <arg name="gt_classify" default="false" />
+  <arg name="scan_topic" default="/velodyne_points" />
 
   <node pkg="point_slam" type="frame_update" name="frame_update" output="screen">
   
