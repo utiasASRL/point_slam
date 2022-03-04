@@ -91,7 +91,7 @@ void PointMapSLAM::publish_2D_map()
 	float score_threshold = 0.6;
 	if (params.filtering)
 		score_threshold = 0.95;
-	score_threshold = 0.95;
+	score_threshold = 0.6;
 
 
 	// Init meta-data

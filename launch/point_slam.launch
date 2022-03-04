@@ -7,6 +7,7 @@
   <arg name="gt_classify" default="false" />
   <arg name="scan_topic" default="/velodyne_points" />
   <arg name="publish_sub_pts" default="true" />
+  <arg name="init_map_path" default="" />
 
   <node pkg="point_slam" type="frame_update" name="frame_update" output="screen">
   
@@ -34,7 +35,7 @@
 
     <!-- New parameter to provide the path to the map ply file -->
     <!-- <param name="init_map_path" value=""/> -->
-    <param name="init_map_path" value="/home/administrator/1-Deep-Collider/results/runs/Myhal/map_update_0001.ply"/>
+    <param name="init_map_path" value="$(arg init_map_path)"/>
     
     <param name="h_scale" value="0.5"/>
     <param name="r_scale" value="4.0"/>
