@@ -113,6 +113,7 @@ public:
 	float map2d_zMin, map2d_zMax;
 	string log_path;
 	bool publish_sub_pts;
+	bool new_map;
 
 	// Methods
 	// *******
@@ -142,6 +143,7 @@ public:
 		filtering = false;
 		gt_filter = true;
 		publish_sub_pts = true;
+		new_map = false;
 		std::iota(loc_labels.begin(), loc_labels.end(), 0);
 		map2d_pixel_size = 0.08;
 		map2d_max_count = 10;

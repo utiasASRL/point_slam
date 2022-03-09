@@ -388,7 +388,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 	// params.verbose = 2;
 
-	bool update_map = false;
+	bool update_map = params.new_map;
 
 	vector<string> clock_str;
 	vector<double> t;
@@ -1481,6 +1481,7 @@ int main(int argc, char **argv)
 	vector<PointXYZ> init_normals;
 	vector<float> init_scores;
 
+
 	////////////////////////
 	// Init Pointmap SLAM //
 	////////////////////////
@@ -1666,6 +1667,8 @@ int main(int argc, char **argv)
 		ROS_WARN_STREAM("Loading :" << init_path);
 		load_cloud_normals(init_path, init_pts, init_normals, init_scores, float_scalar_name, counts, int_scalar_name);
 	}
+	else
+		slam_params.new_map = true;
 	ROS_WARN_STREAM("Loading map: OK");
 
 	///////////////////////
