@@ -267,6 +267,14 @@ public:
 // Function declaration
 // ********************
 
+void readPtCldMsg(const sensor_msgs::PointCloud2::ConstPtr &msg,
+				  vector<PointXYZ> &f_pts,
+				  vector<float> &f_ts,
+				  vector<ushort> &f_rings,
+				  int col_stride,
+				  bool filtering,
+				  SLAM_params &params);
+
 void preprocess_frame(vector<PointXYZ> &f_pts,
 					  vector<float> &f_ts,
 					  vector<ushort> &f_rings,

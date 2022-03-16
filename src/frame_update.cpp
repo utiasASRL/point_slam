@@ -379,6 +379,96 @@ void PointMapSLAM::gotClassifCloud(const sensor_msgs::PointCloud2::ConstPtr& msg
 	return;
 }
 
+void readPtCldMsg(const sensor_msgs::PointCloud2::ConstPtr& msg,
+	vector<PointXYZ> &f_pts,
+	vector<float> &f_ts,
+	vector<ushort> &f_rings,
+	int col_stride,
+	bool filtering,
+	SLAM_params &params)
+{
+
+	// Get the number of points
+	size_t N = (size_t)(msg->width * msg->height);
+
+	// Variables
+	ushort last_ring = 0;
+	int scan_col = 0;
+	bool using_col = false;
+
+	// Cases we can face:
+	// 	1. Real:						filtering		motion
+	//		> raw clouds				false			true
+	//		> classified clouds			true			true
+	// 	1. Simu:
+	//		> raw clouds				false			false
+	//		> classified clouds			true			false
+	//		> raw clouds with gt		true			false (in this case we use a dummy node that republish them 
+	//															as get clouds so we are never in this case)
+
+	f_pts.reserve(N);
+	f_ts.reserve(N);
+	f_rings.reserve(N);
+	int teststep = 0;
+	sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x"), iter_y(*msg, "y"), iter_time(*msg, "time");
+	sensor_msgs::PointCloud2ConstIterator<ushort> iter_ring(*msg, "ring");
+	// sensor_msgs::PointCloud2ConstIterator<int> iter_label(*msg, "classif");
+	for (sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
+			iter_z != iter_z.end();
+			++iter_x, ++iter_y, ++iter_z, ++iter_ring, ++iter_time)
+	{
+
+		// Stride in theta axis (only if ring is available)
+		if ((col_stride > 1) && params.motion_distortion)
+		{
+			if (*iter_ring < last_ring)
+			{
+				if (++scan_col >= col_stride)
+				{
+					scan_col = 0;
+					using_col = true;
+				}
+				else
+					using_col = false;
+			}
+			last_ring = *iter_ring;
+		}
+		else
+		{
+			using_col = true;
+		}
+		
+		// // Filtering (only if classif is available)
+		// if (filtering)
+		// {
+		// 	// Reject points with wrong labels (we never need intensity as we should republish GT simulation labels)
+		// 	if (find(params.loc_labels.begin(), params.loc_labels.end(), (int)*iter_label) == params.loc_labels.end())
+		// 		continue;
+		// }
+		
+		// Add all points to the vector container
+		if (using_col)
+		{
+
+			// Reject NaN values
+			if (isnan(*iter_x) || isnan(*iter_y) || isnan(*iter_z))
+			{
+				ROS_WARN_STREAM("rejected for NaN in point(" << *iter_x << ", " << *iter_y << ", " << *iter_z << ")");
+				continue;
+			}
+
+			f_pts.push_back(PointXYZ(*iter_x, *iter_y, *iter_z));
+			f_ts.push_back(*iter_time);
+			f_rings.push_back(*iter_ring);
+		}
+	}
+
+}
+
+
+
+
+
 
 void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map_2D)
 {
@@ -413,6 +503,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	}
 	t.push_back(omp_get_wtime());
 
+
 	//////////////////////////////
 	// Read point cloud message //
 	//////////////////////////////
@@ -431,102 +522,14 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	}
 
 	// Loop over points and copy in vector container. Do the filtering if necessary
-	// float tan_theta2;
-	// float last_tan_theta2 = 0;
-	ushort last_ring = 0;
-	int scan_col = 0;
-	bool using_col = false;
 	int col_stride = 2;
 	vector<PointXYZ> f_pts;
 	vector<float> f_ts;
 	vector<ushort> f_rings;
-	
-	
-	f_pts.reserve(N);
-	if (filtering)
-	{
-		sensor_msgs::PointCloud2ConstIterator<float> iter_i(*msg, "intensity"), iter_x(*msg, "x"), iter_y(*msg, "y"), iter_time(*msg, "time");
-		sensor_msgs::PointCloud2ConstIterator<ushort> iter_ring(*msg, "ring");
-		for (sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
-			 iter_z != iter_z.end();
-			 ++iter_x, ++iter_y, ++iter_z, ++iter_i, ++iter_ring, ++iter_time)
-		{
-			// Reject points with wrong labels
-			if (find(params.loc_labels.begin(), params.loc_labels.end(), (int)*iter_i) == params.loc_labels.end())
-				continue;
-
-			// Reject NaN values
-			if (isnan(*iter_x) || isnan(*iter_y) || isnan(*iter_z))
-			{
-				ROS_WARN_STREAM("rejected for NaN in point(" << *iter_x << ", " << *iter_y << ", " << *iter_z << ")");
-				continue;
-			}
-
-			// Add kept points to the vector container
-			f_pts.push_back(PointXYZ(*iter_x, *iter_y, *iter_z));
-		}
-	}
-	else if (col_stride > 1)
-	{
-		sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x"), iter_y(*msg, "y"), iter_time(*msg, "time");
-		sensor_msgs::PointCloud2ConstIterator<ushort> iter_ring(*msg, "ring");
-		for (sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
-			 iter_z != iter_z.end();
-			 ++iter_x, ++iter_y, ++iter_z, ++iter_ring, ++iter_time)
-		{
-			// // Eliminate according to angle theta
-			// tan_theta2 = *iter_z * *iter_z / (*iter_x * *iter_x + *iter_x * *iter_x);
-			// if (tan_theta2 < last_tan_theta2)
-			// {
-			// 	if (++scan_col >= col_stride)
-			// 	{
-			// 		scan_col = 0;
-			// 		using_col = true;
-			// 	}
-			// 	else
-			// 		using_col = false;
-			// }
-			// last_tan_theta2 = tan_theta2;
-
-			// Eliminate according to angle theta
-			if (*iter_ring < last_ring)
-			{
-				if (++scan_col >= col_stride)
-				{
-					scan_col = 0;
-					using_col = true;
-				}
-				else
-					using_col = false;
-			}
-			last_ring = *iter_ring;
-			
-
-			// Add all points to the vector container
-			if (using_col)
-			{
-				f_pts.push_back(PointXYZ(*iter_x, *iter_y, *iter_z));
-				f_ts.push_back(*iter_time);
-				f_rings.push_back(*iter_ring);
-			}
-		}
-	}
-	else
-	{
-		sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x"), iter_y(*msg, "y"), iter_time(*msg, "time");
-		sensor_msgs::PointCloud2ConstIterator<ushort> iter_ring(*msg, "ring");
-		for (sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
-			 iter_z != iter_z.end();
-			 ++iter_x, ++iter_y, ++iter_z, ++iter_ring, ++iter_time)
-		{
-			// Add all points to the vector container
-			f_pts.push_back(PointXYZ(*iter_x, *iter_y, *iter_z));
-			f_ts.push_back(*iter_time);
-			f_rings.push_back(*iter_ring);
-		}
-	}
+	readPtCldMsg(msg, f_pts, f_ts, f_rings, col_stride, filtering, params);
 
 	t.push_back(omp_get_wtime());
+
 
 	///////////////////////////////////////////
 	// Get init matrix from current odometry //
@@ -571,8 +574,16 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	preprocess_frame(f_pts, f_ts, f_rings, sub_pts, normals, norm_scores, icp_scores, sub_inds, frame_ground, heights, params, t);
 	
 	// Min and max times (dont loop on the whole frame as it is useless)
-	float loop_ratio = 0.01;
-	get_min_max_times(f_ts, t_min, t_max, loop_ratio);
+	if (params.motion_distortion)
+	{
+		float loop_ratio = 0.01;
+		get_min_max_times(f_ts, t_min, t_max, loop_ratio);
+	}
+	else
+	{
+		t_min = 0;
+		t_max = 0.1;
+	}
 	
 	// Initial interpolation time
 	float t0;
@@ -591,8 +602,6 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		for (int j = 0; j < (int)sub_inds.size(); j++)
 			sub_alphas.push_back((f_ts[sub_inds[j]] - t0) * inv_factor);
 	}
-
-	
 
 	t.push_back(omp_get_wtime());
 
@@ -689,7 +698,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	///////////////////////
 	// Publish transform //
 	///////////////////////
-	
+
 	// Update the last pose for future frames
 	float alpha0 = (t_min - t0) / (t_max - t0);
 	Eigen::Matrix4d new_H_scannerToMap = pose_interp(alpha0, params.icp_params.last_transform0, icp_results.transform, 0);
