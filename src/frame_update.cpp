@@ -700,8 +700,14 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	///////////////////////
 
 	// Update the last pose for future frames
-	float alpha0 = (t_min - t0) / (t_max - t0);
-	Eigen::Matrix4d new_H_scannerToMap = pose_interp(alpha0, params.icp_params.last_transform0, icp_results.transform, 0);
+	Eigen::Matrix4d new_H_scannerToMap;
+	if (params.motion_distortion)
+	{
+		float alpha0 = (t_min - t0) / (t_max - t0);
+		new_H_scannerToMap = pose_interp(alpha0, params.icp_params.last_transform0, icp_results.transform, 0);
+	}
+	else
+		new_H_scannerToMap = icp_results.transform;
 
 	// Compute tf
 	//publishStamp = stamp;
@@ -1452,39 +1458,6 @@ int main(int argc, char **argv)
 	// Node handler and publishers
 	ros::NodeHandle nh;
 	ros::NodeHandle private_nh("~");
-	//ros::Publisher pose_pub = nh.advertise<geometry_msgs::PoseStamped>("slam_pose", 1000);
-	//ros::Publisher map_pub = nh.advertise<sensor_msgs::PointCloud2>("pointmap", 1000);
-
-	//------------------------------------------------------------------------------------------------------------------
-	//
-	//    // TODO: Here useful functions to get the original map from a path variable
-	//
-	//    std::string tour_name("test1");
-	//
-	//    if (!nh.getParam("tour_name", tour_name)){
-	//        std::cout << "ERROR READING TOUR NAME\n";
-	//    }
-	//    TourParser parser(tour_name);
-	//    std::vector<ignition::math::Pose3d> route = parser.GetRoute();
-	//
-	//    std::string username = "default";
-	//    if (const char * user = std::getenv("USER")){
-	//        username = user;
-	//    }
-	//
-	//    std::string start_time;
-	//    if (!nh.getParam("start_time", start_time)){
-	//        std::cout << "ERROR SETTING START TIME\n";
-	//    }
-	//
-	//    std::string filepath = "/home/" + username + "/Myhal_Simulation/simulated_runs/" + start_time + "/";
-	//
-	//    std::ofstream log_file;
-	//    log_file.open(filepath + "/logs-" + start_time + "/log.txt", std::ios_base::app);
-	//
-	//    ROS_WARN("USING TOUR %s\n", tour_name.c_str());
-	//
-	//------------------------------------------------------------------------------------------------------------------
 
 	vector<PointXYZ> init_pts;
 	vector<PointXYZ> init_normals;
