@@ -104,7 +104,7 @@ public:
 	// ROS related
 	string odom_frame;
 	string map_frame;
-	string base_frame;
+	string velo_frame;
 	bool filtering, gt_filter;
 	vector<int> loc_labels;
 	int verbose;
@@ -139,7 +139,7 @@ public:
 
 		odom_frame = "odom";
 		map_frame = "map";
-		base_frame = "base_link";
+		velo_frame = "velodyne";
 		filtering = false;
 		gt_filter = true;
 		publish_sub_pts = true;
@@ -226,7 +226,7 @@ public:
 	void processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map_2D = true);
 	void processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map_2D = true);
 	void publish_2D_map();
-	void publish_sub_frame(vector<PointXYZ> &pts0, ros::Time& stamp0);
+	void publish_sub_frame(vector<PointXYZ> &pts0,  vector<PointXYZ> &ts0, ros::Time& stamp0)
 
 	// Debug method
 	void save_trajectory(string& path)
@@ -272,6 +272,12 @@ void readPtCldMsg(const sensor_msgs::PointCloud2::ConstPtr &msg,
 				  vector<float> &f_ts,
 				  vector<ushort> &f_rings,
 				  int col_stride,
+				  SLAM_params &params);
+
+void readPtCldMsg(const sensor_msgs::PointCloud2::ConstPtr &msg,
+				  vector<PointXYZ> &f_pts,
+				  vector<float> &f_ts,
+				  vector<int> &f_labels,
 				  bool filtering,
 				  SLAM_params &params);
 
