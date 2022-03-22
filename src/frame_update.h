@@ -223,10 +223,10 @@ public:
 	void init_map() { return; }
 	void gotClassifCloud(const sensor_msgs::PointCloud2::ConstPtr& msg);
 	void gotVeloCloud(const sensor_msgs::PointCloud2::ConstPtr& msg);
-	void processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map_2D = true);
-	void processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map_2D = true);
+	void processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering);
+	void processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering);
 	void publish_2D_map();
-	void publish_sub_frame(vector<PointXYZ> &pts0,  vector<PointXYZ> &ts0, ros::Time& stamp0)
+	void publish_sub_frame(vector<PointXYZ> &pts0,  vector<float> &ts0, vector<ushort> &rings0, ros::Time& stamp0);
 
 	// Debug method
 	void save_trajectory(string& path)
@@ -277,6 +277,7 @@ void readPtCldMsg(const sensor_msgs::PointCloud2::ConstPtr &msg,
 void readPtCldMsg(const sensor_msgs::PointCloud2::ConstPtr &msg,
 				  vector<PointXYZ> &f_pts,
 				  vector<float> &f_ts,
+				  vector<ushort> &f_rings,
 				  vector<int> &f_labels,
 				  bool filtering,
 				  SLAM_params &params);

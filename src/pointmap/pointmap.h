@@ -558,7 +558,7 @@ public:
 	}
 
 	// Update map with a set of new points
-	void update_from_3D(vector<PointXYZ> &points3D, vector<int> &rings, size_t n_rings, PointXYZ &center3D, float zMin, float zMax)
+	void update_from_3D(vector<PointXYZ> &points3D, vector<int> &rings, size_t n_rings, PointXYZ &center3D, float zMin, float zMax, float min_range)
 	{
 		////////////////
 		// Init steps //
@@ -591,6 +591,7 @@ public:
 		// Initialize variables
 		float inv_dl = 1 / dl;
 		PixKey k0;
+		float min_range2 = min_range * min_range;
 
 		// Every pixel can be updated only once.
 		vector<bool> not_updated(points.size(), true);
@@ -625,62 +626,66 @@ public:
 		size_t p_i = 0;
 		for (auto &p : points3D)
 		{
-			// Check height limits
-			if (p.z > zMin && p.z < zMax)
+			
+			//	Check min range
+			PointXYZ diff3D(p - center3D);
+			float d2 = diff3D.sq_norm();
+			if (d2 > min_range2)
 			{
-				// Corresponding key
-				k0.x = (int)floor(p.x * inv_dl);
-				k0.y = (int)floor(p.y * inv_dl);
-
-				// Update the point count
-				if (samples.count(k0) < 1)
+				// Check height limits
+				if (p.z > zMin && p.z < zMax)
 				{
-					// Create a new sample at this location
-					init_sample(k0, PointXYZ(((float)k0.x + 0.5) * dl, ((float)k0.y + 0.5) * dl, p.z), 0.9);
+					// Corresponding key
+					k0.x = (int)floor(p.x * inv_dl);
+					k0.y = (int)floor(p.y * inv_dl);
 
-					// Update grid limits
-					update_limits(k0);
+					// Update the point count
+					if (samples.count(k0) < 1)
+					{
+						// Create a new sample at this location
+						init_sample(k0, PointXYZ(((float)k0.x + 0.5) * dl, ((float)k0.y + 0.5) * dl, p.z), 0.9);
+
+						// Update grid limits
+						update_limits(k0);
+					}
+					else
+					{
+						size_t i0 = samples[k0];
+						if (i0 < not_updated.size() && not_updated[i0])
+						{
+							update_sample(i0, 1.0);
+							update_height(i0, p.z);
+							not_updated[i0] = false;
+						}
+					}
+
+					// Add the angle and its corresponding free_range
+					PointXY diff2D(diff3D);
+					size_t angle_idx = (size_t)floor((atan2(diff2D.y, diff2D.x) + M_PI) * inv_angle_res);
+					if (range_table[angle_idx] < 0 || d2 < pow(range_table[angle_idx], 2))
+						range_table[angle_idx] = sqrt(d2);
 				}
 				else
 				{
-					size_t i0 = samples[k0];
-					if (i0 < not_updated.size() && not_updated[i0])
+					// Save as low heigh free range
+					// Add the angle and its corresponding free_range
+					float tmp1 = diff3D.x * diff3D.x + diff3D.y * diff3D.y;
+					float phi = atan2(diff3D.y, diff3D.x); // azimuth angle
+					float theta = atan2(diff3D.z, sqrt(tmp1));
+					size_t phi_idx = (size_t)floor((phi + M_PI) * inv_angle_res);
+					int theta_idx = (int)floor((theta + pi_s_2) * inv_theta_res);
+
+					if (theta_to_ring[theta_idx] < 0)
 					{
-						update_sample(i0, 1.0);
-						update_height(i0, p.z);
-						not_updated[i0] = false;
+						// Update ring theta
+						theta_to_ring[theta_idx] = rings[p_i];
 					}
+
+					// Get index in the low range table
+					size_t angle_idx = phi_idx + n_angles * rings[p_i];
+					if (range_low_table[angle_idx] < 0 || d2 < range_low_table[angle_idx])
+						range_low_table[angle_idx] = d2;
 				}
-
-				// Add the angle and its corresponding free_range
-				PointXY diff2D(p - center3D);
-				size_t angle_idx = (size_t)floor((atan2(diff2D.y, diff2D.x) + M_PI) * inv_angle_res);
-				float d2 = diff2D.sq_norm();
-				if (range_table[angle_idx] < 0 || d2 < pow(range_table[angle_idx], 2))
-					range_table[angle_idx] = sqrt(d2);
-			}
-			else
-			{
-				// Save as low heigh free range
-				// Add the angle and its corresponding free_range
-				PointXYZ diff3D(p - center3D);
-				float tmp1 = diff3D.x * diff3D.x + diff3D.y * diff3D.y;
-				float d2 = tmp1 + diff3D.z * diff3D.z;
-				float phi = atan2(diff3D.y, diff3D.x); // azimuth angle
-				float theta = atan2(diff3D.z, sqrt(tmp1));
-				size_t phi_idx = (size_t)floor((phi + M_PI) * inv_angle_res);
-				int theta_idx = (int)floor((theta + pi_s_2) * inv_theta_res);
-
-				if (theta_to_ring[theta_idx] < 0)
-				{
-					// Update ring theta
-					theta_to_ring[theta_idx] = rings[p_i];
-				}
-
-				// Get index in the low range table
-				size_t angle_idx = phi_idx + n_angles * rings[p_i];
-				if (range_low_table[angle_idx] < 0 || d2 < range_low_table[angle_idx])
-					range_low_table[angle_idx] = d2;
 			}
 
 			p_i++;
@@ -763,7 +768,6 @@ public:
 			r -= pow(0.05, 2);
 
 		// Update free pixels
-		float min_r2 = pow(0.1, 2);
 		float min_free_h = 0.3;
 		p_i = 0;
 		for (auto &p : points)
@@ -785,7 +789,7 @@ public:
 				float d2 = diff2D.sq_norm();
 
 				// Update score
-				if (d2 > min_r2 && d2 < pow(range_table[angle_idx], 2))
+				if (d2 > min_range2 && d2 < pow(range_table[angle_idx], 2))
 				{
 					update_sample(p_i, 0.0);
 				}
@@ -810,7 +814,7 @@ public:
 					size_t angle_idx = phi_idx + n_angles * ring_i;
 
 					// Update score
-					if (d2 > min_r2 && d2 < range_low_table[angle_idx] )
+					if (d2 > min_range2 && d2 < range_low_table[angle_idx] )
 					{
 						update_sample(p_i, 0.0);
 					}
@@ -830,8 +834,7 @@ public:
 		for (auto &p : points)
 			points3D.push_back(PointXYZ(p.x, p.y, 0));
 
-		cout << endl
-			 << "---------------------------------------------" << endl;
+		cout << endl << "---------------------------------------------" << endl;
 		vector<float> features(scores);
 		features.reserve(scores.size() * 2);
 		for (auto &c : counts)
@@ -842,7 +845,6 @@ public:
 		string filepath = path + string(buffer);
 		cout << filepath << endl;
 		save_cloud(filepath, points3D, features);
-		cout << "---------------------------------------------" << endl
-			 << endl;
+		cout << "---------------------------------------------" << endl << endl;
 	}
 };

@@ -91,7 +91,7 @@ void PointMapSLAM::publish_2D_map()
 	float score_threshold = 0.6;
 	if (params.filtering)
 		score_threshold = 0.95;
-	score_threshold = 0.6;
+	score_threshold = 0.45;
 
 
 	// Init meta-data
@@ -129,10 +129,10 @@ void PointMapSLAM::publish_2D_map()
 	sstm.publish(map_message.map.info);
 }
 
-void PointMapSLAM::publish_sub_frame(vector<PointXYZ> &pts0,  vector<PointXYZ> &ts0, ros::Time& stamp0)
+void PointMapSLAM::publish_sub_frame(vector<PointXYZ> &pts0, vector<float> &ts0, vector<ushort> &rings0, ros::Time& stamp0)
 {
 
-  	const uint32_t POINT_STEP = 16;
+  	const uint32_t POINT_STEP = 18;
 	sensor_msgs::PointCloud2 pt_message;
 	
 	// make sure to set the header information on the map
@@ -145,7 +145,7 @@ void PointMapSLAM::publish_sub_frame(vector<PointXYZ> &pts0,  vector<PointXYZ> &
 	pt_message.width = pts0.size();
 
 	// PointField[] 
-	pt_message.fields.resize(4);
+	pt_message.fields.resize(5);
 	pt_message.fields[0].name = "x";
 	pt_message.fields[0].offset = 0;
 	pt_message.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
@@ -166,6 +166,11 @@ void PointMapSLAM::publish_sub_frame(vector<PointXYZ> &pts0,  vector<PointXYZ> &
 	pt_message.fields[3].datatype = sensor_msgs::PointField::FLOAT32;
 	pt_message.fields[3].count = 1;
 
+	pt_message.fields[4].name = "ring";
+	pt_message.fields[4].offset = 16;
+	pt_message.fields[4].datatype = sensor_msgs::PointField::UINT16;
+	pt_message.fields[4].count = 1;
+
 	pt_message.data.resize(std::max((size_t)1, pts0.size()) * POINT_STEP, 0x00);
 
 	pt_message.point_step = POINT_STEP;
@@ -182,6 +187,7 @@ void PointMapSLAM::publish_sub_frame(vector<PointXYZ> &pts0,  vector<PointXYZ> &
 		*(reinterpret_cast<float*>(ptr + 4)) = pts0[i].y;
 		*(reinterpret_cast<float*>(ptr + 8)) = pts0[i].z;
 		*(reinterpret_cast<float*>(ptr + 12)) = ts0[i];
+		*(reinterpret_cast<ushort*>(ptr + 16)) = rings0[i];
 		ptr += POINT_STEP;
 	}
 
@@ -278,6 +284,7 @@ void readPtCldMsg(const sensor_msgs::PointCloud2::ConstPtr& msg,
 void readPtCldMsg(const sensor_msgs::PointCloud2::ConstPtr& msg,
 	vector<PointXYZ> &f_pts,
 	vector<float> &f_ts,
+	vector<ushort> &f_rings,
 	vector<int> &f_labels,
 	bool filtering,
 	SLAM_params &params)
@@ -291,9 +298,10 @@ void readPtCldMsg(const sensor_msgs::PointCloud2::ConstPtr& msg,
 	f_labels.reserve(N);
 	sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x"), iter_y(*msg, "y"), iter_time(*msg, "time");
 	sensor_msgs::PointCloud2ConstIterator<int> iter_label(*msg, "classif");
+	sensor_msgs::PointCloud2ConstIterator<ushort> iter_ring(*msg, "ring");
 	for (sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
 			iter_z != iter_z.end();
-			++iter_x, ++iter_y, ++iter_z, ++iter_label, ++iter_time)
+			++iter_x, ++iter_y, ++iter_z, ++iter_label, ++iter_ring, ++iter_time)
 	{
 		// Filtering (only if classif is available)
 		if (filtering)
@@ -314,6 +322,7 @@ void readPtCldMsg(const sensor_msgs::PointCloud2::ConstPtr& msg,
 		f_pts.push_back(PointXYZ(*iter_x, *iter_y, *iter_z));
 		f_ts.push_back(*iter_time);
 		f_labels.push_back(*iter_label);
+		f_rings.push_back(*iter_ring);
 	}
 
 }
@@ -483,17 +492,14 @@ void PointMapSLAM::gotVeloCloud(const sensor_msgs::PointCloud2::ConstPtr& msg)
 {
 	// Here we process raw lidar pointclouds
 	// In this implementation, we never update the 3D map. We assume we already have a map
-	if (params.filtering)
-	{
-		// If predictions are provided, we do not update the 2D global costmap
-		processCloud(msg, false, false);
 
-	}
-	else
-	{
-		// If no predictions, we update the 2D global costmap
-		processCloud(msg, false, true);
-	}
+	// We always process cloud with hte same function
+	//
+	//	> If their are prediction, we still update 2D map for long range (predictions are only short range)
+	//	> we modify the min range and the 2D map threshold in the parameters
+	//
+	processCloud(msg, false);
+
 }
 
 
@@ -502,48 +508,19 @@ void PointMapSLAM::gotClassifCloud(const sensor_msgs::PointCloud2::ConstPtr& msg
 	// Here we process the classified point clouds (3 lidar frames already aligned)
 	if (params.filtering)
 	{
-		processClassifCloud(msg, true, true);
+		processClassifCloud(msg, true);
 
 	}
 	else
 	{
-		processClassifCloud(msg, false, true);
+		processClassifCloud(msg, false);
 	}
 
 	return;
 }
 
 
-
-//
-//	processCloud (Raw Lidar)
-//		1. Read pt cloud msg
-//		2. Get Odom
-//		3. Preprocess frame and compute normals
-//		4. Align frame on map with ICP
-//		5. Publish transform
-//		6. Publish aligned sub points
-//		7. Update the map
-//		8. Update the 2D map
-//		9. Publish 2D map
-//
-//
-//	processClassifCloud (Classified Lidar)
-//		1. Read pt cloud msg
-//		2. Get Map transform
-//		3. 
-//		4. 
-//		5. 
-//		6. 
-//		7. Update the map
-//		8. Update the 2D map
-//		9. Publish 2D map
-//
-//
-//
-
-
-void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map_2D)
+void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering)
 {
 	//////////////////////
 	// Optional verbose //
@@ -552,6 +529,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// params.verbose = 2;
 
 	bool update_map = params.new_map;
+	bool update_map_2D = true;
 
 	vector<string> clock_str;
 	vector<double> t;
@@ -593,17 +571,17 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		ROS_WARN_STREAM("Frame #" << msg->header.seq << " with only " << N << " points is ignored.");
 		return;
 	}
-
+	
 	// Loop over points and copy in vector container. Do the filtering if necessary
 	int col_stride = 2;
 	vector<PointXYZ> f_pts;
 	vector<float> f_ts;
 	vector<ushort> f_rings;
-	readPtCldMsg(msg, f_pts, f_ts, f_rings, col_stride, filtering, params);
+	readPtCldMsg(msg, f_pts, f_ts, f_rings, col_stride, params);
 
 	t.push_back(omp_get_wtime());
 
-
+	
 	///////////////////////////////////////////
 	// Get init matrix from current odometry //
 	///////////////////////////////////////////
@@ -619,7 +597,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		ROS_ERROR_STREAM("Extrapolation Exception. stamp = " << stamp << " now = " << ros::Time::now() << " delta = " << ros::Time::now() - stamp);
 		return;
 	}
-
+	
 	// If no odometry is given, previous one
 	if (H_OdomToScanner.lpNorm<1>() < 0.001)
 		H_OdomToScanner = last_H.inverse() * H_OdomToMap;
@@ -628,7 +606,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	Eigen::Matrix4d H_scannerToMap_init = H_OdomToMap * H_OdomToScanner.inverse();
 
 	t.push_back(omp_get_wtime());
-
+	
 	// ROS_WARN_STREAM("TOdomToScanner(" << params.odom_frame << " to " << msg->header.frame_id << "):\n" << H_OdomToScanner);
 	// ROS_WARN_STREAM("TOdomToMap(" << params.odom_frame << " to " << params.map_frame << "):\n" << H_OdomToMap);
 	// ROS_WARN_STREAM("TscannerToMap (" << msg->header.frame_id << " to " << params.map_frame << "):\n" << H_scannerToMap_init);
@@ -645,7 +623,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	Plane3D frame_ground;
 	vector<float> heights;
 	preprocess_frame(f_pts, f_ts, f_rings, sub_pts, normals, norm_scores, icp_scores, sub_inds, frame_ground, heights, params, t);
-	
+		
 	// Min and max times (dont loop on the whole frame as it is useless)
 	if (params.motion_distortion)
 	{
@@ -657,14 +635,14 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		t_min = -0.1;
 		t_max = 0.0;
 	}
-	
+		
 	// Initial interpolation time
 	float t0;
 	if (map.size() < 1 || params.icp_params.max_iter < 1)
 		t0 = t_min - (t_max - t_min);
 	else
 		t0 = params.icp_params.last_time + (float)(latest_stamp.toSec() - stamp.toSec());
-
+	
 	// Get the motion_distortion values from timestamps
 	// 0 for t0 (old t_min) and 1 for t_max
 	vector<float> sub_alphas;
@@ -677,14 +655,19 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	}
 	
 	vector<float> sub_ts;
+	vector<ushort> sub_rings;
 	if (params.publish_sub_pts)
 	{
 		sub_ts.reserve(sub_inds.size());
 		for (int j = 0; j < (int)sub_inds.size(); j++)
-			sub_ts.push_back((f_ts[sub_inds[j]]);
+			sub_ts.push_back(f_ts[sub_inds[j]]);
+		sub_rings.reserve(sub_inds.size());
+		for (int j = 0; j < (int)sub_inds.size(); j++)
+			sub_rings.push_back(f_rings[sub_inds[j]]);
 	}
 
 	t.push_back(omp_get_wtime());
+	
 
 	/////////////////////////////////
 	// Align frame on map with ICP //
@@ -776,7 +759,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 	t.push_back(omp_get_wtime());
 
-	///////////////////////
+		///////////////////////
 	// Publish transform //
 	///////////////////////
 
@@ -797,7 +780,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// ROS_WARN_STREAM("TOdomToMap:\n" << H_OdomToMap);
 
 	t.push_back(omp_get_wtime());
-
+	
 	////////////////////////////////
 	// Publish aligned sub points //
 	////////////////////////////////
@@ -844,12 +827,12 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 			norms_mat = R_tot * norms_mat;
 		}
 	}
-
+	
 	if (params.publish_sub_pts)
 	{
-		publish_sub_frame(sub_pts, sub_ts, stamp);
+		publish_sub_frame(sub_pts, sub_ts, sub_rings, stamp);
 	}
-
+	
 	t.push_back(omp_get_wtime());
 	
 	////////////////////
@@ -861,7 +844,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 		// The update function is called only on subsampled points as the others have no normal
 		map.update(sub_pts, normals, norm_scores, n_frames);
 	}
-
+	
 	t.push_back(omp_get_wtime());
 
 
@@ -872,8 +855,8 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	vector<float> f_2Dts;
 	// vector<float> heights_2D;
 
-	vector<ushort> wanted_rings = {0, 1, 2, 14};
-
+	vector<ushort> wanted_rings = {0, 1, 2, 3, 12, 13, 14};
+	
 	if (update_map_2D)
 	{
 		// Only use some rings not all
@@ -925,16 +908,21 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 			center.z = T_tot.z();
 		}
 	}
-
+	
 	t.push_back(omp_get_wtime());
+
+
+	float map2D_min_range = 0.1;
+	if (params.filtering)
+		map2D_min_range = 8.5;
 
 
 	if (update_map_2D || map2D.size() < 1)
 	{
 		// Update 2D map
-		map2D.update_from_3D(f_2Dpts, f_2Drings, wanted_rings.size(), center, params.map2d_zMin, params.map2d_zMax);
+		map2D.update_from_3D(f_2Dpts, f_2Drings, wanted_rings.size(), center, params.map2d_zMin, params.map2d_zMax, map2D_min_range);
 	}
-
+	
 	// // DEBUG ////////////////////////////
 
 	// // Debug is case of strong angular rotation
@@ -964,11 +952,11 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// /////////////////////////////////////
 
 	t.push_back(omp_get_wtime());
-
+	
 	// Once for the initialization of ros global_costmap
 	if (n_frames < 2 || true)
 		publish_2D_map();
-
+	
 	t.push_back(omp_get_wtime());
 	
 	// Update the last pose for future frames
@@ -1027,7 +1015,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 }
 
 
-void PointMapSLAM::processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering, bool update_map_2D)
+void PointMapSLAM::processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, bool filtering)
 {
 	//////////////////////
 	// Optional verbose //
@@ -1073,8 +1061,9 @@ void PointMapSLAM::processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr&
 	int col_stride = 2;
 	vector<PointXYZ> f_pts;
 	vector<float> f_ts;
+	vector<ushort> f_rings;
 	vector<int> f_labels;
-	readPtCldMsg(msg, f_pts, f_ts, f_labels, filtering, params);
+	readPtCldMsg(msg, f_pts, f_ts, f_rings, f_labels, filtering, params);
 
 	t.push_back(omp_get_wtime());
 
@@ -1092,78 +1081,65 @@ void PointMapSLAM::processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr&
 	}
 	else
 	{
-		t1 = -0.1;
-		t2 = 0.0;
+		t1 = -0.05;
+		t2 = 0.05;
 	}
 	
-	// earliest and latest time of the frame
-	ros::Time stamp_1 = stamp + ros::Duration(t1);
-	ros::Time stamp_2 = stamp + ros::Duration(t2 - 1e-6);
+	// // earliest and latest time of the frame
+	// ros::Time stamp_1 = stamp + ros::Duration(t1);
+	// ros::Time stamp_2 = stamp + ros::Duration(t2);
+
+	// Time stamp in the middle of the frame
+	ros::Time stamp_mid = stamp + ros::Duration((t2 + t1) / 2);
 	
 	// Get current pose of the scanner in the odom frame
-	// Eigen::Matrix4d H_ScannerToMap_1;
-	// Eigen::Matrix4d H_ScannerToMap_2;
-	Eigen::Matrix4d H_MapToScanner_1;
-	Eigen::Matrix4d H_MapToScanner_2;
+	Eigen::Matrix4d H_ScannerToMap;
 	try
 	{
-		H_MapToScanner_1 = transformListenerToEigenMatrix(tfListener, params.velo_frame, params.map_frame, stamp_1);
-		H_ScannerToMap_1 = H_MapToScanner_1.inverse();
+		H_ScannerToMap = transformListenerToEigenMatrix(tfListener, params.map_frame, params.velo_frame, stamp_mid);
 	}
 	catch (tf::ExtrapolationException e)
 	{
-		ROS_ERROR_STREAM("Extrapolation Exception. stamp = " << stamp_1 << " now = " << ros::Time::now() << " delta = " << ros::Time::now() - stamp_1);
-		return;
-	}
-	try
-	{
-		H_MapToScanner_2 = transformListenerToEigenMatrix(tfListener, params.velo_frame, params.map_frame, stamp_2);
-		H_ScannerToMap_2 = H_MapToScanner_2.inverse();
-	}
-	catch (tf::ExtrapolationException e)
-	{
-		ROS_ERROR_STREAM("Extrapolation Exception. stamp = " << stamp_2 << " now = " << ros::Time::now() << " delta = " << ros::Time::now() - stamp_2);
+		ROS_ERROR_STREAM("Extrapolation Exception. stamp = " << stamp_mid << " now = " << ros::Time::now() << " delta = " << ros::Time::now() - stamp_mid);
 		return;
 	}
 
 	t.push_back(omp_get_wtime());
+	
 
+	//////////////////////////////////
+	// Remove unwanted ring indices //
+	//////////////////////////////////
+	
+	// Wanted ring for ray traicing
+	// vector<ushort> wanted_rings = {0, 1, 2, 14};
+	vector<ushort> wanted_rings = {0, 1, 2, 3, 4, 12, 13, 14, 15};
 
-	////////////////////////////////
-	// Align frame for raytracing //
-	////////////////////////////////
-
-
-	vector<PointXYZ> velo_pts(f_pts);
-	if (params.motion_distortion)
+	vector<PointXYZ> f_2Dpts;
+	vector<int> f_2Drings;
+	vector<float> f_2Dts;
+	f_2Dpts.reserve(f_pts.size());
+	f_2Dts.reserve(f_ts.size());
+	f_2Drings.reserve(f_rings.size());
+	for (size_t i_2D = 0; i_2D < f_rings.size(); i_2D++)
 	{
-		// Get the motion_distortion values from timestamps
-		vector<float> alphas;
-		float inv_factor = 1 / (t2 - t1);
-		alphas.reserve(f_ts.size());
-		for (int j = 0; j < (int)f_ts.size(); j++)
-			alphas.push_back((f_ts[j] - t1) * inv_factor);
-
-		// Update map taking motion distortion into account
-		size_t i_inds = 0;
-		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)velo_pts.data(), 3, velo_pts.size());
-		#pragma omp parallel for schedule(static) num_threads(params.n_threads)
-		for (auto& alpha : sub_alphas)
+		auto found_r = find(wanted_rings.begin(), wanted_rings.end(), f_rings[i_2D]);
+		if (found_r != wanted_rings.end())
 		{
-			Eigen::Matrix4d H_rect = pose_interp(alpha, H_MapToScanner_1, H_MapToScanner_2, 0);
-			Eigen::Matrix3f R_rect = (H_rect.block(0, 0, 3, 3)).cast<float>();
-			Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
-			pts_mat.col(i_inds) = (R_rect * pts_mat.col(i_inds)) + T_rect;
-			i_inds++;
+			f_2Dpts.push_back(f_pts[i_2D]);
+			f_2Dts.push_back(f_ts[i_2D]);
+			f_2Drings.push_back((int)(found_r - wanted_rings.begin()));
 		}
 	}
-	else
-	{
-		Eigen::Map<Eigen::Matrix<float, 3, Eigen::Dynamic>> pts_mat((float *)velo_pts.data(), 3, velo_pts.size());
-		Eigen::Matrix3f R_tot = (H_MapToScanner_2.block(0, 0, 3, 3)).cast<float>();
-		Eigen::Vector3f T_tot = (H_MapToScanner_2.block(0, 3, 3, 1)).cast<float>();
-		pts_mat = (R_tot * pts_mat).colwise() + T_tot;
-	}
+
+	// No need to align as frame is already aligned
+
+	// Get center point
+	PointXYZ center;
+	Eigen::Vector3f T_rect = (H_ScannerToMap.block(0, 3, 3, 1)).cast<float>();
+	center.x = T_rect.x();
+	center.y = T_rect.y();
+	center.z = T_rect.z();
 
 	t.push_back(omp_get_wtime());
 	
@@ -1172,30 +1148,8 @@ void PointMapSLAM::processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr&
 	// Update the 2D map //
 	///////////////////////
 
-	// Variables
-	PointXYZ center;
-	vector<PointXYZ> f_2Dpts;
-	vector<int> f_2Drings;
-	vector<float> f_2Dts;
-	// vector<float> heights_2D;
-
-	// Get center point
-	Eigen::Matrix4d H_rect;
-	if (params.motion_distortion)
-	{
-		float alpha = 0.5;
-		H_rect = pose_interp(alpha, H_ScannerToMap_1, H_ScannerToMap_2, 0);
-	else
-		H_rect = H_ScannerToMap_2;
-	Eigen::Vector3f T_rect = (H_rect.block(0, 3, 3, 1)).cast<float>();
-	center.x = T_rect.x();
-	center.y = T_rect.y();
-	center.z = T_rect.z();
-
-	// TODO: Here, replace f_2Dpts and verify that the update_from_3D function works
-
 	// Update 2D map
-	map2D.update_from_3D(f_2Dpts, f_2Drings, wanted_rings.size(), center, params.map2d_zMin, params.map2d_zMax);
+	map2D.update_from_3D(f_2Dpts, f_2Drings, wanted_rings.size(), center, params.map2d_zMin, params.map2d_zMax, 0.1);
 
 	t.push_back(omp_get_wtime());
 
