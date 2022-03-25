@@ -1348,6 +1348,7 @@ int main(int argc, char **argv)
 		else
 			slam_params.loc_labels = vector<int>{0, 1, 2, 3};
 	}
+	
 
 	/////////////////////
 	// Get initial map //

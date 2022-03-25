@@ -141,7 +141,7 @@ public:
 		map_frame = "map";
 		velo_frame = "velodyne";
 		filtering = false;
-		gt_filter = true;
+		gt_filter = false;
 		publish_sub_pts = true;
 		new_map = false;
 		std::iota(loc_labels.begin(), loc_labels.end(), 0);

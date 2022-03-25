@@ -12,7 +12,7 @@
   <node pkg="point_slam" type="frame_update" name="frame_update" output="screen">
   
     <param name="odom_frame" value="odom"/>
-    <param name="base_frame" value="base_link"/>
+    <param name="velo_frame" value="velodyne"/>
     <param name="map_topic" value="$(arg map_topic)"/>
     <param name="map_frame" value="$(arg map_frame)"/>
     
@@ -26,8 +26,8 @@
 
     <param name="map_voxel_size" value="0.06"/>         <!-- Originally 0.03 -->
     <param name="frame_voxel_size" value="0.12"/>       <!-- Originally 0.10 -->
-    <param name="map2d_pixel_size" value="0.06"/>
-    <param name="map2d_max_count" value="50"/>
+    <param name="map2d_pixel_size" value="0.12"/>
+    <param name="map2d_max_count" value="4"/>
     <param name="map2d_z_min" value="0.08"/>
     <param name="map2d_z_max" value="1.2"/>
     <param name="motion_distortion" value="false"/>
