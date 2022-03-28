@@ -665,7 +665,9 @@ public:
 					if (range_table[angle_idx] < 0 || d2 < pow(range_table[angle_idx], 2))
 						range_table[angle_idx] = sqrt(d2);
 				}
-				else
+
+				// Update all low height free ranges
+				if (p.z < zMax)
 				{
 					// Save as low heigh free range
 					// Add the angle and its corresponding free_range

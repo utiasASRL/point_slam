@@ -1288,6 +1288,7 @@ int main(int argc, char **argv)
 	}
 	slam_params.icp_params.avg_steps = (size_t)tmp;
 	tmp = (int)slam_params.icp_params.max_iter;
+	
 	if (!private_nh.getParam("icp_max_iter", tmp))
 	{
 		ROS_WARN("Warning: Cannot read icp_max_iter");
