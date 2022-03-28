@@ -28,9 +28,7 @@
     <param name="frame_voxel_size" value="0.12"/>       <!-- Originally 0.10 -->
     <param name="map2d_pixel_size" value="0.12"/>
     <param name="map2d_max_count" value="4"/>
-    <param name="map2d_z_min" value="0.1
-    
-    8"/>
+    <param name="map2d_z_min" value="0.18"/>
     <param name="map2d_z_max" value="1.2"/>
     <param name="motion_distortion" value="true"/>
     <param name="lidar_n_lines" value="32"/>
