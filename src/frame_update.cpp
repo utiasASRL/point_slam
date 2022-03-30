@@ -257,7 +257,7 @@ void readPtCldMsg(const sensor_msgs::PointCloud2::ConstPtr& msg,
 		// if (filtering)
 		// {
 		// 	// Reject points with wrong labels (we never need intensity as we should republish GT simulation labels)
-		// 	if (find(params.loc_labels.begin(), params.loc_labels.end(), (int)*iter_label) == params.loc_labels.end())
+		// 	if (find(params.map_labels.begin(), params.map_labels.end(), (int)*iter_label) == params.map_labels.end())
 		// 		continue;
 		// }
 		
@@ -307,7 +307,7 @@ void readPtCldMsg(const sensor_msgs::PointCloud2::ConstPtr& msg,
 		if (filtering)
 		{
 			// Reject points with wrong labels (we never need intensity as we should republish GT simulation labels)
-			if (find(params.loc_labels.begin(), params.loc_labels.end(), (int)*iter_label) == params.loc_labels.end())
+			if (find(params.map_labels.begin(), params.map_labels.end(), (int)*iter_label) == params.map_labels.end())
 				continue;
 		}
 		
@@ -855,7 +855,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	vector<float> f_2Dts;
 	// vector<float> heights_2D;
 
-	vector<ushort> wanted_rings = {0, 1, 2, 3, 12, 13, 14};
+	vector<ushort> wanted_rings = {0, 1, 2, 3, 18, 19};
 	
 	if (update_map_2D)
 	{
@@ -1056,6 +1056,9 @@ void PointMapSLAM::processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr&
 		ROS_WARN_STREAM("Frame #" << msg->header.seq << " with only " << N << " points is ignored.");
 		return;
 	}
+	
+	// We don't filter point initially as they provide rays. We do that in the map2D update directly
+	bool init_filering = false;
 
 	// Loop over points and copy in vector container. Do the filtering if necessary
 	int col_stride = 2;
@@ -1063,10 +1066,16 @@ void PointMapSLAM::processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr&
 	vector<float> f_ts;
 	vector<ushort> f_rings;
 	vector<int> f_labels;
-	readPtCldMsg(msg, f_pts, f_ts, f_rings, f_labels, filtering, params);
+	readPtCldMsg(msg, f_pts, f_ts, f_rings, f_labels, init_filering, params);
 
 	t.push_back(omp_get_wtime());
 
+	// Get the mask of points we use for updating the 2D map
+	
+	vector<bool> f_mask;
+	f_mask.reserve(f_labels.size());
+	for (auto &label: f_labels)
+		f_mask.push_back(find(params.map_labels.begin(), params.map_labels.end(), label) != params.map_labels.end());
 
 	////////////////////////////
 	// Get loc matrix from tf //
@@ -1113,14 +1122,17 @@ void PointMapSLAM::processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr&
 	
 	// Wanted ring for ray traicing
 	// vector<ushort> wanted_rings = {0, 1, 2, 14};
-	vector<ushort> wanted_rings = {0, 1, 2, 3, 4, 12, 13, 14, 15};
+	// vector<ushort> wanted_rings = {0, 1, 2, 3, 4, 12, 14, 16, 18};
+	vector<ushort> wanted_rings = {0, 1, 2, 3, 18, 19};
 
 	vector<PointXYZ> f_2Dpts;
 	vector<int> f_2Drings;
+	vector<bool> f_2Dmask;
 	vector<float> f_2Dts;
 	f_2Dpts.reserve(f_pts.size());
 	f_2Dts.reserve(f_ts.size());
 	f_2Drings.reserve(f_rings.size());
+	f_2Dmask.reserve(f_mask.size());
 	for (size_t i_2D = 0; i_2D < f_rings.size(); i_2D++)
 	{
 		auto found_r = find(wanted_rings.begin(), wanted_rings.end(), f_rings[i_2D]);
@@ -1129,6 +1141,7 @@ void PointMapSLAM::processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr&
 			f_2Dpts.push_back(f_pts[i_2D]);
 			f_2Dts.push_back(f_ts[i_2D]);
 			f_2Drings.push_back((int)(found_r - wanted_rings.begin()));
+			f_2Dmask.push_back(f_mask[i_2D]);
 		}
 	}
 
@@ -1142,6 +1155,20 @@ void PointMapSLAM::processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr&
 	center.z = T_rect.z();
 
 	t.push_back(omp_get_wtime());
+
+	// cout << "SAVING" << endl;
+	// char buffer[200];
+	// string path = "/home/hth/Deep-Collison-Checker/";
+	// sprintf(buffer, "debug_%05d_f_pts.ply", n_frames);
+	// vector<float> f1(f_labels.begin(), f_labels.end());
+	// f1.insert(f1.end(), f_rings.begin(),  f_rings.end());
+	// save_cloud(path + string(buffer), f_pts, f1);
+	// cout << "OK" << endl;
+	// sprintf(buffer, "debug_%05d_f_2Ds.ply", n_frames);
+	// vector<float> f12(f_2Dmask.begin(), f_2Dmask.end());
+	// f12.insert(f12.end(), f_2Drings.begin(),  f_2Drings.end());
+	// save_cloud(path + string(buffer), f_2Dpts, f12);
+	// cout << "OK2" << endl;
 	
 
 	///////////////////////
@@ -1149,7 +1176,7 @@ void PointMapSLAM::processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr&
 	///////////////////////
 
 	// Update 2D map
-	map2D.update_from_3D(f_2Dpts, f_2Drings, wanted_rings.size(), center, params.map2d_zMin, params.map2d_zMax, 0.1);
+	map2D.update_from_3D(f_2Dpts, f_2Drings, f_2Dmask, wanted_rings.size(), center, params.map2d_zMin, params.map2d_zMax, 0.1);
 
 	t.push_back(omp_get_wtime());
 
@@ -1344,10 +1371,13 @@ int main(int argc, char **argv)
 	// Init filtered categories here
 	if (slam_params.filtering)
 	{
-		if (slam_params.gt_filter)
-			slam_params.loc_labels = vector<int>{0, 1, 4, 5, 6};
-		else
-			slam_params.loc_labels = vector<int>{0, 1, 2, 3};
+		// if (slam_params.gt_filter)
+		// 	slam_params.map_labels = vector<int>{0, 1, 4, 5, 6};
+		// else
+		// 	slam_params.map_labels = vector<int>{0, 1, 2, 3};
+		
+		// We never use gt, we republish
+		slam_params.map_labels = vector<int>{2, 3};
 	}
 	
 

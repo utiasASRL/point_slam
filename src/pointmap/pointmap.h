@@ -560,6 +560,13 @@ public:
 	// Update map with a set of new points
 	void update_from_3D(vector<PointXYZ> &points3D, vector<int> &rings, size_t n_rings, PointXYZ &center3D, float zMin, float zMax, float min_range)
 	{
+		vector<bool> mask(rings.size(), true);
+		update_from_3D(points3D, rings, mask, n_rings, center3D, zMin, zMax, min_range);
+	}
+
+	// Update map with a set of new points
+	void update_from_3D(vector<PointXYZ> &points3D, vector<int> &rings, vector<bool> &mask, size_t n_rings, PointXYZ &center3D, float zMin, float zMax, float min_range)
+	{
 		////////////////
 		// Init steps //
 		////////////////
@@ -640,22 +647,25 @@ public:
 					k0.y = (int)floor(p.y * inv_dl);
 
 					// Update the point count
-					if (samples.count(k0) < 1)
+					if (mask[p_i])
 					{
-						// Create a new sample at this location
-						init_sample(k0, PointXYZ(((float)k0.x + 0.5) * dl, ((float)k0.y + 0.5) * dl, p.z), 0.9);
-
-						// Update grid limits
-						update_limits(k0);
-					}
-					else
-					{
-						size_t i0 = samples[k0];
-						if (i0 < not_updated.size() && not_updated[i0])
+						if (samples.count(k0) < 1)
 						{
-							update_sample(i0, 1.0);
-							update_height(i0, p.z);
-							not_updated[i0] = false;
+							// Create a new sample at this location
+							init_sample(k0, PointXYZ(((float)k0.x + 0.5) * dl, ((float)k0.y + 0.5) * dl, p.z), 0.9);
+
+							// Update grid limits
+							update_limits(k0);
+						}
+						else
+						{
+							size_t i0 = samples[k0];
+							if (i0 < not_updated.size() && not_updated[i0])
+							{
+								update_sample(i0, 1.0);
+								update_height(i0, p.z);
+								not_updated[i0] = false;
+							}
 						}
 					}
 

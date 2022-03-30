@@ -106,7 +106,7 @@ public:
 	string map_frame;
 	string velo_frame;
 	bool filtering, gt_filter;
-	vector<int> loc_labels;
+	vector<int> map_labels;
 	int verbose;
 	float map2d_pixel_size;
 	int map2d_max_count;
@@ -119,7 +119,7 @@ public:
 	// *******
 
 	// Constructor
-	SLAM_params() : loc_labels(7)
+	SLAM_params() : map_labels(7)
 	{
 		lidar_n_lines = 32;
 		min_theta_radius = 0.025;
@@ -144,7 +144,7 @@ public:
 		gt_filter = false;
 		publish_sub_pts = true;
 		new_map = false;
-		std::iota(loc_labels.begin(), loc_labels.end(), 0);
+		std::iota(map_labels.begin(), map_labels.end(), 0);
 		map2d_pixel_size = 0.08;
 		map2d_max_count = 10;
 		map2d_zMin = 0.5;
