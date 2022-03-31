@@ -25,7 +25,7 @@
     <param name="n_threads" value="8"/>
 
     <param name="map_voxel_size" value="0.06"/>         <!-- Originally 0.03 -->
-    <param name="frame_voxel_size" value="0.12"/>       <!-- Originally 0.10 -->
+    <param name="frame_voxel_size" value="0.06"/>       <!-- Originally 0.10 -->
     <param name="map2d_pixel_size" value="0.12"/>
     <param name="map2d_max_count" value="4"/>
     <param name="map2d_z_min" value="0.18"/>
