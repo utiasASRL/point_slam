@@ -855,7 +855,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	vector<float> f_2Dts;
 	// vector<float> heights_2D;
 
-	vector<ushort> wanted_rings = {0, 1, 2, 3, 18, 19};
+	vector<ushort> wanted_rings = {0, 1, 2, 3, 13, 14, 19};
 	
 	if (update_map_2D)
 	{
@@ -1123,7 +1123,7 @@ void PointMapSLAM::processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr&
 	// Wanted ring for ray traicing
 	// vector<ushort> wanted_rings = {0, 1, 2, 14};
 	// vector<ushort> wanted_rings = {0, 1, 2, 3, 4, 12, 14, 16, 18};
-	vector<ushort> wanted_rings = {0, 1, 2, 3, 18, 19};
+	vector<ushort> wanted_rings = {0, 1, 2, 3, 13, 14, 19};
 
 	vector<PointXYZ> f_2Dpts;
 	vector<int> f_2Drings;
