@@ -911,11 +911,15 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	
 	t.push_back(omp_get_wtime());
 
-
+	// If there is no filtering with dynamic point predictions, update map here
 	float map2D_min_range = 0.1;
+
+	// Otherwise, only update the map outside the prediction area
 	if (params.filtering)
 		map2D_min_range = 8.5;
 
+	// TEMP DEBUG, actually no update at all here. Only remove points
+	map2D_min_range = 99998.5;
 
 	if (update_map_2D || map2D.size() < 1)
 	{
