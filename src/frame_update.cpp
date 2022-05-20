@@ -918,8 +918,8 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	if (params.filtering)
 		map2D_min_range = 8.5;
 
-	// TEMP DEBUG, actually no update at all here. Only remove points
-	map2D_min_range = 99998.5;
+	// // TEMP DEBUG, actually no update at all here. Only remove points
+	// map2D_min_range = 99998.5;
 
 	if (update_map_2D || map2D.size() < 1)
 	{
