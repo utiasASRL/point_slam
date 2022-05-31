@@ -759,7 +759,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 	t.push_back(omp_get_wtime());
 
-		///////////////////////
+	///////////////////////
 	// Publish transform //
 	///////////////////////
 
