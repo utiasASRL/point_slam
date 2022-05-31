@@ -857,6 +857,10 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 	vector<ushort> wanted_rings = {0, 1, 2, 3, 13, 14, 19};
 	
+	// For real clouds ring 13 and 14 are the horizontal ones
+	if (params.motion_distortion)
+		wanted_rings.pop_back();
+	
 	if (update_map_2D)
 	{
 		// Only use some rings not all
@@ -1128,6 +1132,10 @@ void PointMapSLAM::processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr&
 	// vector<ushort> wanted_rings = {0, 1, 2, 14};
 	// vector<ushort> wanted_rings = {0, 1, 2, 3, 4, 12, 14, 16, 18};
 	vector<ushort> wanted_rings = {0, 1, 2, 3, 13, 14, 19};
+
+	// For real clouds ring 13 and 14 are the horizontal ones
+	if (params.motion_distortion)
+		wanted_rings.pop_back();
 
 	vector<PointXYZ> f_2Dpts;
 	vector<int> f_2Drings;
