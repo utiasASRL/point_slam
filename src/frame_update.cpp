@@ -16,10 +16,10 @@ void dummy_callback_2(const sensor_msgs::PointCloud2::ConstPtr& msg)
   ROS_INFO("I heard one pred cloud message");
 }
 
-void dummy_callback_3(const vox_msgs::VoxGrid::ConstPtr& msg)
-{
-  ROS_INFO("I heard one pred message");
-}
+// void dummy_callback_3(const vox_msgs::VoxGrid::ConstPtr& msg)
+// {
+//   ROS_INFO("I heard one pred message");
+// }
 
 // void dummy_callback_4(const costmap_converter::ObstacleArrayMsg::ConstPtr& msg)
 // {
@@ -526,8 +526,6 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 	// Optional verbose //
 	//////////////////////
 
-	// params.verbose = 2;
-
 	bool update_map = params.new_map;
 	bool update_map_2D = true;
 
@@ -1029,8 +1027,6 @@ void PointMapSLAM::processClassifCloud(const sensor_msgs::PointCloud2::ConstPtr&
 	// Optional verbose //
 	//////////////////////
 
-	// params.verbose = 2;
-
 	bool update_map = params.new_map;
 
 	vector<string> clock_str;
@@ -1391,6 +1387,9 @@ int main(int argc, char **argv)
 		// We never use gt, we republish
 		slam_params.map_labels = vector<int>{2, 3};
 	}
+
+
+	slam_params.verbose = 2;
 	
 
 	/////////////////////

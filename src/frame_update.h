@@ -29,7 +29,7 @@
 
 // #include <costmap_converter_msgs/msg/obstacle_msg.h>
 // #include <costmap_converter/ObstacleArrayMsg.h>
-#include <vox_msgs/VoxGrid.h>
+// #include <vox_msgs/VoxGrid.h>
 
 using namespace std;
 
@@ -41,7 +41,7 @@ typedef Eigen::Matrix<double, 6, 1> Vector6d;
 
 void dummy_callback(const nav_msgs::OccupancyGrid::ConstPtr& msg);
 void dummy_callback_2(const sensor_msgs::PointCloud2::ConstPtr& msg);
-void dummy_callback_3(const vox_msgs::VoxGrid::ConstPtr& msg);
+// void dummy_callback_3(const vox_msgs::VoxGrid::ConstPtr& msg);
 // void dummy_callback_4(const costmap_converter::ObstacleArrayMsg::ConstPtr& msg);
 
 
