@@ -21,10 +21,10 @@ void dummy_callback_3(const vox_msgs::VoxGrid::ConstPtr& msg)
   ROS_INFO("I heard one pred message");
 }
 
-void dummy_callback_4(const costmap_converter::ObstacleArrayMsg::ConstPtr& msg)
-{
-  ROS_INFO("I heard one obstacle message");
-}
+// void dummy_callback_4(const costmap_converter::ObstacleArrayMsg::ConstPtr& msg)
+// {
+//   ROS_INFO("I heard one obstacle message");
+// }
 
 
 //-----------------------------------------------------------------------------------------------------------------------------
@@ -35,7 +35,7 @@ void dummy_callback_4(const costmap_converter::ObstacleArrayMsg::ConstPtr& msg)
 Eigen::Matrix4d transformListenerToEigenMatrix(const tf::TransformListener& listener, const string& target, const string& source, const ros::Time& stamp)
 {
 	tf::StampedTransform stampedTr;
-	if (!listener.waitForTransform(target, source, stamp, ros::Duration(0.1)))
+	if (!listener.waitForTransform(target, source, stamp, ros::Duration(0.9)))
 	{
 		ROS_WARN_STREAM("Cannot get transformation from " << source << " to " << target);
 		return Eigen::Matrix4d::Zero(4, 4);
@@ -1425,7 +1425,7 @@ int main(int argc, char **argv)
 	}
 
 
-	ROS_WARN_STREAM("Trying to load :" << init_path);
+	ROS_WARN_STREAM("Trying to load map or start a new one:");
 
 	// Load the previous map
 	vector<int> counts;
@@ -1435,10 +1435,11 @@ int main(int argc, char **argv)
 	{
 		ROS_WARN_STREAM("Loading :" << init_path);
 		load_cloud_normals(init_path, init_pts, init_normals, init_scores, float_scalar_name, counts, int_scalar_name);
+		ROS_WARN_STREAM("Loading map: OK");
 	}
 	else
+		ROS_WARN_STREAM("Starting a new map.");
 		slam_params.new_map = true;
-	ROS_WARN_STREAM("Loading map: OK");
 
 	///////////////////////
 	// Init mapper class //
