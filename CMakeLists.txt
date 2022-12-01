@@ -16,7 +16,6 @@ find_package(catkin REQUIRED COMPONENTS
   tf_conversions 
   message_filters 
   eigen_conversions
-  vox_msgs
 )
 
 # let cmake find OpenMP and set some variables
@@ -42,7 +41,6 @@ endif()
 catkin_package(
   DEPENDS pcl_ros roscpp rospy std_msgs rosbag sensor_msgs pcl_conversions nav_msgs geometry_msgs 
   move_base_msgs actionlib tf tf_conversions message_filters eigen_conversions OpenMP
-  vox_msgs
 	INCLUDE_DIRS include
 )
 
