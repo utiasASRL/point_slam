@@ -1389,7 +1389,7 @@ int main(int argc, char **argv)
 	}
 
 
-	slam_params.verbose = 2;
+	// slam_params.verbose = 2;
 	
 
 	/////////////////////
