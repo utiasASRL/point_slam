@@ -8,6 +8,13 @@
   <arg name="scan_topic" default="/velodyne_points" />
   <arg name="publish_sub_pts" default="true" />
   <arg name="init_map_path" default="" />
+  <arg name="gt_pos_x" default="0.0" />
+  <arg name="gt_pos_y" default="0.0" />
+  <arg name="gt_pos_z" default="0.0" />
+  <arg name="gt_rot_x" default="0.0" />
+  <arg name="gt_rot_y" default="0.0" />
+  <arg name="gt_rot_z" default="0.0" />
+  <arg name="gt_rot_w" default="1.0" />
 
   <node pkg="point_slam" type="frame_update" name="frame_update" output="screen">
   
@@ -47,6 +54,14 @@
     <param name="icp_planar_dist" value="0.12"/>      <!-- Originally 0.12 -->
     <param name="icp_avg_steps" value="1"/>           <!-- Originally 5 -->
     <param name="icp_max_iter" value="50"/>           <!-- Originally 100 -->
+
+    <param name="init_translate_x" value="$(arg gt_pos_x)"/>
+    <param name="init_translate_y" value="$(arg gt_pos_y)"/>
+    <param name="init_translate_z" value="$(arg gt_pos_z)"/>
+    <param name="init_qx" value="$(arg gt_ori_x)"/>
+    <param name="init_qy" value="$(arg gt_ori_y)"/>
+    <param name="init_qz" value="$(arg gt_ori_z)"/>
+    <param name="init_qw" value="$(arg gt_ori_w)"/>
 
   </node>
 

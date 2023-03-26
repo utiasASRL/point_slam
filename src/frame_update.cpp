@@ -731,7 +731,15 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 			// TODO: Here we need to handle initial alignment case
 			H_scannerToMap_init = Eigen::Matrix4d::Identity();
-			H_scannerToMap_init(2, 3) = 0.7;
+			//H_scannerToMap_init(2, 3) = 0.7;
+			H_scannerToMap_init(0, 3) = params.init_translate_x;
+			H_scannerToMap_init(1, 3) = params.init_translate_y;
+			H_scannerToMap_init(2, 3) = params.init_translate_z;
+			// Form rotation matrix from initial quaternion
+			Eigen::Quaterniond init_quat = Eigen::Quaterniond(params.init_qw, params.init_qx, params.init_qy, params.init_qz);
+			init_quat.normalize();
+			// Print out initial quaternion
+			H_scannerToMap_init.block(0, 0, 3, 3) = init_quat.toRotationMatrix();
 
 			// Case where we have a map, and the first frame needs to be aligned
 			// We assume robot is still in the beginning so no motion distortion
@@ -1356,6 +1364,34 @@ int main(int argc, char **argv)
 	if (!private_nh.getParam("publish_sub_pts", slam_params.publish_sub_pts))
 	{
 		ROS_WARN("Warning: Cannot read publish_sub_pts");
+	}
+	if (!private_nh.getParam("init_translate_x", slam_params.init_translate_x))
+	{
+		ROS_WARN("Warning: Cannot read init_translate_x");
+	}
+	if (!private_nh.getParam("init_translate_y", slam_params.init_translate_y))
+	{
+		ROS_WARN("Warning: Cannot read init_translate_y");
+	}
+	if (!private_nh.getParam("init_translate_z", slam_params.init_translate_z))
+	{
+		ROS_WARN("Warning: Cannot read init_translate_z");
+	}
+	if (!private_nh.getParam("init_qx", slam_params.init_qx))
+	{
+		ROS_WARN("Warning: Cannot read init_qx");
+	}
+	if (!private_nh.getParam("init_qy", slam_params.init_qy))
+	{
+		ROS_WARN("Warning: Cannot read init_qy");
+	}
+	if (!private_nh.getParam("init_qz", slam_params.init_qz))
+	{
+		ROS_WARN("Warning: Cannot read init_qz");
+	}
+	if (!private_nh.getParam("init_qw", slam_params.init_qw))
+	{
+		ROS_WARN("Warning: Cannot read init_qw");
 	}
 
 	// Update motion distortion in ICP params
