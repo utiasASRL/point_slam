@@ -728,8 +728,6 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 
 
 			// 2. ICP refine
-
-			// TODO: Here we need to handle initial alignment case
 			H_scannerToMap_init = Eigen::Matrix4d::Identity();
 			//H_scannerToMap_init(2, 3) = 0.7;
 			H_scannerToMap_init(0, 3) = params.init_translate_x;
@@ -737,6 +735,7 @@ void PointMapSLAM::processCloud(const sensor_msgs::PointCloud2::ConstPtr& msg, b
 			H_scannerToMap_init(2, 3) = params.init_translate_z;
 			// Form rotation matrix from initial quaternion
 			Eigen::Quaterniond init_quat = Eigen::Quaterniond(params.init_qw, params.init_qx, params.init_qy, params.init_qz);
+			// Normalize quaternion
 			init_quat.normalize();
 			// Print out initial quaternion
 			H_scannerToMap_init.block(0, 0, 3, 3) = init_quat.toRotationMatrix();

@@ -10,11 +10,11 @@
   <arg name="init_map_path" default="" />
   <arg name="gt_pos_x" default="0.0" />
   <arg name="gt_pos_y" default="0.0" />
-  <arg name="gt_pos_z" default="0.0" />
-  <arg name="gt_rot_x" default="0.0" />
-  <arg name="gt_rot_y" default="0.0" />
-  <arg name="gt_rot_z" default="0.0" />
-  <arg name="gt_rot_w" default="1.0" />
+  <arg name="gt_pos_z" default="0.7" />
+  <arg name="gt_ori_x" default="0.0" />
+  <arg name="gt_ori_y" default="0.0" />
+  <arg name="gt_ori_z" default="0.0" />
+  <arg name="gt_ori_w" default="1.0" />
 
   <node pkg="point_slam" type="frame_update" name="frame_update" output="screen">
   
