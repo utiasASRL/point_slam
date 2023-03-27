@@ -88,6 +88,14 @@ public:
 	// Number of threads used
 	int n_threads;
 
+	// Have initial translation init_translate as a 3x1 vector
+	double init_translate_x;
+	double init_translate_y;
+	double init_translate_z;
+	double init_qx;
+	double init_qy;
+	double init_qz;
+	double init_qw;
 
 	// Transformation matrix from velodyne frame to base frame
 	Eigen::Matrix4d H_velo_base;
@@ -151,6 +159,14 @@ public:
 		map2d_zMax = 1.5;
 		verbose = 0;
 		log_path = "";
+
+		init_translate_x = 0.0;
+		init_translate_y = 0.0;
+		init_translate_z = 0.0;
+		init_qx = 0.0;
+		init_qy = 0.0;
+		init_qz = 0.0;
+		init_qw = 1.0;
 	}
 };
 
